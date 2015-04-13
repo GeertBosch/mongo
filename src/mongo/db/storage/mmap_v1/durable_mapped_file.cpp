@@ -60,6 +60,8 @@ namespace mongo {
     using std::pair;
     using std::string;
 
+    MONGO_FP_DECLARE(DurWriteConflictException);
+
     void DurableMappedFile::remapThePrivateView() {
         verify(storageGlobalParams.dur);
 
@@ -158,6 +160,7 @@ namespace mongo {
 
                     severe() << "MongoDB has exhausted the system memory capacity.";
                     severe() << "Current Memory Status: " << bb.obj().toString();
+                    throw WriteConflictException();
                 }
 
                 severe() << "VirtualProtect for " << mmf->filename()

@@ -31,15 +31,19 @@
 
 #pragma once
 
+#include "mongo/db/concurrency/write_conflict_exception.h"
+#include "mongo/util/fail_point.h"
+#include "mongo/util/fail_point_service.h"
 #include "mongo/util/mmap.h"
 #include "mongo/util/paths.h"
 
 namespace mongo {
 
-    /** DurableMappedFile adds some layers atop memory mapped files - specifically our handling of private views & such.
-        if you don't care about journaling/durability (temp sort files & such) use MemoryMappedFile class,
-        not this.
-    */
+    /**
+     * DurableMappedFile adds some layers atop memory mapped files - specifically our handling of
+     * private views & such. If you don't care about journaling/durability (temp sort files & such)
+     * use MemoryMappedFile class, not this.
+     */
     class DurableMappedFile : private MemoryMappedFile {
     protected:
         virtual void* viewForFlushing() { return _view_write; }
@@ -233,8 +237,16 @@ namespace mongo {
 #endif
     };
 
-#ifdef _WIN32
+    // Failpoint to throw write conflict exceptions randomly
+    MONGO_FP_FORWARD_DECLARE(DurWriteConflictException);
+
     inline void PointerToDurableMappedFile::makeWritable(void *privateView, unsigned len) {
+        // Allow for testing failure paths
+        if (kDebugBuild && MONGO_FAIL_POINT(DurWriteConflictException)) {
+            throw WriteConflictException();
+        }
+
+#ifdef _WIN32
         size_t p = reinterpret_cast<size_t>(privateView);
         unsigned a = p / MemoryMappedCOWBitset::ChunkSize;
         unsigned b = (p + len) / MemoryMappedCOWBitset::ChunkSize;
@@ -244,11 +256,8 @@ namespace mongo {
                 makeChunkWritable(i);
             }
         }
-    }
-#else
-    inline void PointerToDurableMappedFile::makeWritable(void *_p, unsigned len) {
-    }
 #endif
+    }
 
     // allows a pointer into any private view of a DurableMappedFile to be resolved to the DurableMappedFile object
     extern PointerToDurableMappedFile privateViews;
