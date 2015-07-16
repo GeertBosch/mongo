@@ -45,6 +45,7 @@
 
 #include "mongo/db/jsobj.h"
 #include "mongo/db/json.h"
+#include "mongo/db/client.h"
 #include "mongo/db/storage/mmap_v1/logfile.h"
 #include "mongo/db/storage/mmap_v1/mmap.h"
 #include "mongo/platform/atomic_word.h"
@@ -205,12 +206,13 @@ void go() {
         }
     }
     BSONObj& o = options;
+    auto txn = cc().makeOperationContext();
 
     if (o["mmf"].trueValue()) {
         delete lf;
         lf = 0;
         mmfFile = new MemoryMappedFile();
-        mmf = (char*)mmfFile->map(fname);
+        mmf = (char*)mmfFile->map(txn.get(), fname);
         verify(mmf);
 
         syncDelaySecs = options["syncDelay"].numberInt();

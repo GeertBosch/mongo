@@ -78,7 +78,7 @@ public:
 
     virtual Status dropDatabase(OperationContext* txn, StringData db);
 
-    virtual int flushAllFiles(bool sync);
+    virtual int flushAllFiles(OperationContext* txn, bool sync);
 
     virtual bool isDurable() const;
 

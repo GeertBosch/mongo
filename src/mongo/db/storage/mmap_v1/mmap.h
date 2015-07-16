@@ -33,7 +33,9 @@
 #include <sstream>
 #include <vector>
 
-#include "mongo/util/concurrency/rwlock.h"
+#include "mongo/db/client.h"
+#include "mongo/db/concurrency/d_concurrency.h"
+#include "mongo/db/operation_context.h"
 
 namespace mongo {
 
@@ -62,12 +64,14 @@ private:
 // lock order: lock dbMutex before this if you lock both
 class LockMongoFilesShared {
     friend class LockMongoFilesExclusive;
-    static RWLockRecursiveNongreedy mmmutex;
     static unsigned era;
-    RWLockRecursive::Shared lk;
+    Lock::ResourceLock lk;
 
 public:
-    LockMongoFilesShared() : lk(mmmutex) {}
+    explicit LockMongoFilesShared(OperationContext* txn)
+        : lk(txn->lockState(), resourceIdMMAPV1Files, MODE_IS) {
+        dassert(txn == cc().getOperationContext());
+    }
 
     /** era changes anytime memory maps come and go.  thus you can use this as a cheap way to check
         if nothing has changed since the last time you locked.  Of course you must be shared locked
@@ -79,19 +83,22 @@ public:
         return era;
     }
 
-    static void assertExclusivelyLocked() {
-        mmmutex.assertExclusivelyLocked();
+    static void assertExclusivelyLocked(OperationContext* txn) {
+        invariant(txn->lockState()->isLockHeldForMode(resourceIdMMAPV1Files, MODE_X));
     }
-    static void assertAtLeastReadLocked() {
-        mmmutex.assertAtLeastReadLocked();
+
+    static void assertAtLeastReadLocked(OperationContext* txn) {
+        invariant(txn->lockState()->isLockHeldForMode(resourceIdMMAPV1Files, MODE_IS));
     }
 };
 
 class LockMongoFilesExclusive {
-    RWLockRecursive::Exclusive lk;
+    Lock::ResourceLock lk;
 
 public:
-    LockMongoFilesExclusive() : lk(LockMongoFilesShared::mmmutex) {
+    explicit LockMongoFilesExclusive(OperationContext* txn)
+        : lk(txn->lockState(), resourceIdMMAPV1Files, MODE_X) {
+        dassert(txn == cc().getOperationContext());
         LockMongoFilesShared::era++;
     }
 };
@@ -105,7 +112,7 @@ public:
     class Flushable {
     public:
         virtual ~Flushable() {}
-        virtual void flush() = 0;
+        virtual void flush(OperationContext* txn) = 0;
     };
 
     MongoFile() {}
@@ -121,7 +128,7 @@ public:
         called from within a mutex that MongoFile uses. so be careful not to deadlock.
     */
     template <class F>
-    static void forEach(F fun);
+    static void forEach(OperationContext* txn, F fun);
 
     /**
      * note: you need to be in mmmutex when using this. forEach (above) handles that for you
@@ -133,9 +140,8 @@ public:
     static void (*notifyPreFlush)();
     static void (*notifyPostFlush)();
 
-    static int flushAll(bool sync);  // returns n flushed
-    static long long totalMappedLength();
-    static void closeAllFiles(std::stringstream& message);
+    static int flushAll(OperationContext* txn, bool sync);  // returns n flushed
+    static void closeAllFiles(OperationContext* txn, std::stringstream& message);
 
     virtual bool isDurableMappedFile() {
         return false;
@@ -144,30 +150,36 @@ public:
     std::string filename() const {
         return _filename;
     }
-    void setFilename(const std::string& fn);
+    void setFilename(OperationContext* txn, const std::string& fn);
 
     virtual uint64_t getUniqueId() const = 0;
 
 private:
     std::string _filename;
-    static int _flushAll(bool sync);  // returns n flushed
+    static int _flushAll(OperationContext* txn, bool sync);  // returns n flushed
+
 protected:
-    virtual void close() = 0;
+    virtual void close(OperationContext* txn) = 0;
     virtual void flush(bool sync) = 0;
+
+    /**
+     * Returns true iff the file is closed.
+     */
+    virtual bool isClosed() = 0;
     /**
      * returns a thread safe object that you can call flush on
      * Flushable has to fail nicely if the underlying object gets killed
      */
     virtual Flushable* prepareFlush() = 0;
 
-    void created(); /* subclass must call after create */
+    void created(OperationContext* txn); /* subclass must call after create */
 
     /* subclass must call in destructor (or at close).
        removes this from pathToFile and other maps
        safe to call more than once, albeit might be wasted work
        ideal to call close to the close, if the close is well before object destruction
     */
-    void destroyed();
+    void destroyed(OperationContext* txn);
 
     virtual unsigned long long length() const = 0;
 };
@@ -182,7 +194,7 @@ class MongoFileFinder {
     MONGO_DISALLOW_COPYING(MongoFileFinder);
 
 public:
-    MongoFileFinder() {}
+    explicit MongoFileFinder(OperationContext* txn) : _lk(txn) {}
 
     /** @return The MongoFile object associated with the specified file name.  If no file is open
                 with the specified name, returns null.
@@ -205,25 +217,25 @@ protected:
 public:
     MemoryMappedFile();
 
-    virtual ~MemoryMappedFile() {
-        LockMongoFilesExclusive lk;
-        close();
-    }
+    virtual ~MemoryMappedFile();
 
-    virtual void close();
+    virtual void close(OperationContext* txn);
 
     // Throws exception if file doesn't exist. (dm may2010: not sure if this is always true?)
-    void* map(const char* filename);
+    void* map(OperationContext* txn, const char* filename);
 
     /** @param options see MongoFile::Options
     */
-    void* mapWithOptions(const char* filename, int options);
+    void* mapWithOptions(OperationContext* txn, const char* filename, int options);
 
     /* Creates with length if DNE, otherwise uses existing file length,
        passed length.
        @param options MongoFile::Options bits
     */
-    void* map(const char* filename, unsigned long long& length, int options = 0);
+    void* map(OperationContext* txn,
+              const char* filename,
+              unsigned long long& length,
+              int options = 0);
 
     /* Create. Must not exist.
        @param zero fill file with zeros when true
@@ -231,6 +243,9 @@ public:
     void* create(const std::string& filename, unsigned long long len, bool zero);
 
     void flush(bool sync);
+
+    bool isClosed();
+
     virtual Flushable* prepareFlush();
 
     long shortLength() const {
@@ -252,13 +267,19 @@ public:
         return _uniqueId;
     }
 
+    static int totalMappedLengthInMB() {
+        return static_cast<int>(totalMappedLength.load() / (1024 * 1024));
+    }
+
 private:
     static void updateLength(const char* filename, unsigned long long& length);
+
 
     HANDLE fd;
     HANDLE maphandle;
     std::vector<void*> views;
     unsigned long long len;
+    static AtomicUInt64 totalMappedLength;
     const uint64_t _uniqueId;
 #ifdef _WIN32
     // flush Mutex
@@ -273,13 +294,13 @@ private:
 
 protected:
     /** close the current private view and open a new replacement */
-    void* remapPrivateView(void* oldPrivateAddr);
+    void* remapPrivateView(OperationContext* txn, void* oldPrivateAddr);
 };
 
 /** p is called from within a mutex that MongoFile uses.  so be careful not to deadlock. */
 template <class F>
-inline void MongoFile::forEach(F p) {
-    LockMongoFilesShared lklk;
+inline void MongoFile::forEach(OperationContext* txn, F p) {
+    LockMongoFilesShared lklk(txn);
     const std::set<MongoFile*>& mmfiles = MongoFile::getAllFiles();
     for (std::set<MongoFile*>::const_iterator i = mmfiles.begin(); i != mmfiles.end(); i++)
         p(*i);

@@ -36,6 +36,7 @@
 #include <boost/filesystem/operations.hpp>
 #include <fstream>
 
+#include "mongo/db/client.h"
 #include "mongo/db/mongod_options.h"
 #include "mongo/db/storage/mmap_v1/mmap.h"
 #include "mongo/db/storage/mmap_v1/data_file_sync.h"
@@ -319,8 +320,8 @@ void MMAPV1Engine::_listDatabases(const std::string& directory, std::vector<std:
     }
 }
 
-int MMAPV1Engine::flushAllFiles(bool sync) {
-    return MongoFile::flushAll(sync);
+int MMAPV1Engine::flushAllFiles(OperationContext* txn, bool sync) {
+    return MongoFile::flushAll(txn, sync);
 }
 
 bool MMAPV1Engine::isDurable() const {
@@ -337,16 +338,26 @@ void MMAPV1Engine::cleanShutdown() {
     // synchronous signal, which we don't expect
     log() << "shutdown: waiting for fs preallocator..." << endl;
     FileAllocator::get()->waitUntilFinished();
+    auto txn = cc().getOperationContext();
+
+    // In some cases we may shutdown early before we have any operation context yet, but we need
+    // one for synchronization purposes.
+    ServiceContext::UniqueOperationContext newTxn;
+    if (!txn) {
+        newTxn = cc().makeOperationContext();
+        txn = newTxn.get();
+        invariant(txn);
+    }
 
     if (storageGlobalParams.dur) {
         log() << "shutdown: final commit..." << endl;
 
-        getDur().commitAndStopDurThread();
+        getDur().commitAndStopDurThread(txn);
     }
 
     log() << "shutdown: closing all files..." << endl;
     stringstream ss3;
-    MemoryMappedFile::closeAllFiles(ss3);
+    MemoryMappedFile::closeAllFiles(txn, ss3);
     log() << ss3.str() << endl;
 }
-}
+}  // namespace

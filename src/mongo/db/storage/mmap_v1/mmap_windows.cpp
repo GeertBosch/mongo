@@ -33,6 +33,7 @@
 
 #include "mongo/db/storage/mmap_v1/mmap.h"
 
+#include "mongo/db/client.h"
 #include "mongo/db/storage/mmap_v1/durable_mapped_file.h"
 #include "mongo/db/storage/mmap_v1/file_allocator.h"
 #include "mongo/stdx/mutex.h"
@@ -40,8 +41,6 @@
 #include "mongo/util/processinfo.h"
 #include "mongo/util/text.h"
 #include "mongo/util/timer.h"
-
-namespace mongo {
 
 using std::endl;
 using std::string;
@@ -51,6 +50,7 @@ namespace {
 mongo::AtomicUInt64 mmfNextId(0);
 }
 
+namespace mongo {
 static size_t fetchMinOSPageSizeBytes() {
     SYSTEM_INFO si;
     GetSystemInfo(&si);
@@ -59,6 +59,26 @@ static size_t fetchMinOSPageSizeBytes() {
     return minOSPageSizeBytes;
 }
 const size_t g_minOSPageSizeBytes = fetchMinOSPageSizeBytes();
+
+class WindowsFlushable : public MemoryMappedFile::Flushable {
+public:
+    WindowsFlushable(MemoryMappedFile* theFile,
+                     void* view,
+                     HANDLE fd,
+                     const uint64_t id,
+                     const std::string& filename,
+                     stdx::mutex& flushMutex);
+
+    void flush(OperationContext* txn);
+
+    MemoryMappedFile* _theFile;  // this may be deleted while we are running
+    void* _view;
+    HANDLE _fd;
+    const uint64_t _id;
+    string _filename;
+    stdx::mutex& _flushMutex;
+};
+
 
 // MapViewMutex
 //
@@ -154,11 +174,11 @@ static void* getNextMemoryMappedFileLocation(unsigned long long mmfSize) {
 
 MemoryMappedFile::MemoryMappedFile()
     : _uniqueId(mmfNextId.fetchAndAdd(1)), fd(0), maphandle(0), len(0) {
-    created();
+    created(cc().getOperationContext());
 }
 
-void MemoryMappedFile::close() {
-    LockMongoFilesShared::assertExclusivelyLocked();
+void MemoryMappedFile::close(OperationContext* txn) {
+    LockMongoFilesShared::assertExclusivelyLocked(txn);
 
     // Prevent flush and close from concurrently running
     stdx::lock_guard<stdx::mutex> lk(_flushMutex);
@@ -175,10 +195,15 @@ void MemoryMappedFile::close() {
     if (maphandle)
         CloseHandle(maphandle);
     maphandle = 0;
-    if (fd)
+    if (fd) {
         CloseHandle(fd);
-    fd = 0;
-    destroyed();  // cleans up from the master list of mmaps
+        fd = 0;
+    }
+    destroyed(txn);  // cleans up from the master list of mmaps
+}
+
+bool MemoryMappedFile::isClosed() {
+    return !fd && !views.size();
 }
 
 unsigned long long mapped = 0;
@@ -201,7 +226,7 @@ void* MemoryMappedFile::createReadOnlyMap() {
                                              0,             // bytes to map, 0 == all
                                              thisAddress);  // address to place file
 
-        if (0 == readOnlyMapAddress) {
+        if (readOnlyMapAddress == 0) {
             DWORD dosError = GetLastError();
 
             ++current_retry;
@@ -227,9 +252,68 @@ void* MemoryMappedFile::createReadOnlyMap() {
     return readOnlyMapAddress;
 }
 
-void* MemoryMappedFile::map(const char* filenameIn, unsigned long long& length, int options) {
+void* MemoryMappedFile::createPrivateMap() {
+    verify(maphandle);
+
+    stdx::lock_guard<stdx::mutex> lk(mapViewMutex);
+
+    LPVOID thisAddress = getNextMemoryMappedFileLocation(len);
+
+    void* privateMapAddress = NULL;
+    int current_retry = 0;
+
+    while (true) {
+        privateMapAddress = MapViewOfFileEx(maphandle,      // file mapping handle
+                                            FILE_MAP_READ,  // access
+                                            0,
+                                            0,             // file offset, high and low
+                                            0,             // bytes to map, 0 == all
+                                            thisAddress);  // address to place file
+
+        if (privateMapAddress == 0) {
+            DWORD dosError = GetLastError();
+
+            ++current_retry;
+
+            // If we failed to allocate a memory mapped file, try again in case we picked
+            // an address that Windows is also trying to use for some other VM allocations
+            if (dosError == ERROR_INVALID_ADDRESS && current_retry < 5) {
+                continue;
+            }
+
+            log() << "MapViewOfFileEx for " << filename() << " failed with error "
+                  << errnoWithDescription(dosError) << " (file size is " << len << ")"
+                  << " in MemoryMappedFile::createPrivateMap" << endl;
+
+            fassertFailed(16167);
+        }
+
+        break;
+    }
+
+    views.push_back(privateMapAddress);
+    return privateMapAddress;
+}
+
+extern stdx::mutex mapViewMutex;
+
+void MemoryMappedFile::flush(bool sync) {
+    uassert(13056, "Async flushing not supported on windows", sync);
+    if (!views.empty()) {
+        WindowsFlushable f(this, viewForFlushing(), fd, _uniqueId, filename(), _flushMutex);
+        auto txn = cc().getOperationContext();
+        invariant(txn);
+        f.flush(txn);
+    }
+}
+
+
+void* MemoryMappedFile::map(OperationContext* txn,
+                            const char* filenameIn,
+                            unsigned long long& length,
+                            int options) {
     verify(fd == 0 && len == 0);  // can't open more than once
-    setFilename(filenameIn);
+    setFilename(txn, filenameIn);
     FileAllocator::get()->allocateAsap(filenameIn, length);
     /* big hack here: Babble uses db names with colons.  doesn't seem to work on windows.  temporary
      * perhaps. */
@@ -285,7 +369,7 @@ void* MemoryMappedFile::map(const char* filenameIn, unsigned long long& length, 
             log() << "CreateFileMappingW for " << filename << " failed with "
                   << errnoWithDescription(dosError) << " (file size is " << length << ")"
                   << " in MemoryMappedFile::map" << endl;
-            close();
+            close(txn);
             fassertFailed(16225);
         }
     }
@@ -336,7 +420,7 @@ void* MemoryMappedFile::map(const char* filenameIn, unsigned long long& length, 
                       << length << ")"
                       << " in MemoryMappedFile::map" << endl;
 
-                close();
+                close(txn);
                 fassertFailed(16166);
             }
 
@@ -344,58 +428,14 @@ void* MemoryMappedFile::map(const char* filenameIn, unsigned long long& length, 
         }
     }
 
-    views.push_back(view);
     len = length;
+
+    views.push_back(view);
     return view;
 }
 
-extern stdx::mutex mapViewMutex;
-
-void* MemoryMappedFile::createPrivateMap() {
-    verify(maphandle);
-
-    stdx::lock_guard<stdx::mutex> lk(mapViewMutex);
-
-    LPVOID thisAddress = getNextMemoryMappedFileLocation(len);
-
-    void* privateMapAddress = NULL;
-    int current_retry = 0;
-
-    while (true) {
-        privateMapAddress = MapViewOfFileEx(maphandle,      // file mapping handle
-                                            FILE_MAP_READ,  // access
-                                            0,
-                                            0,             // file offset, high and low
-                                            0,             // bytes to map, 0 == all
-                                            thisAddress);  // address to place file
-
-        if (privateMapAddress == 0) {
-            DWORD dosError = GetLastError();
-
-            ++current_retry;
-
-            // If we failed to allocate a memory mapped file, try again in case we picked
-            // an address that Windows is also trying to use for some other VM allocations
-            if (dosError == ERROR_INVALID_ADDRESS && current_retry < 5) {
-                continue;
-            }
-
-            log() << "MapViewOfFileEx for " << filename() << " failed with error "
-                  << errnoWithDescription(dosError) << " (file size is " << len << ")"
-                  << " in MemoryMappedFile::createPrivateMap" << endl;
-
-            fassertFailed(16167);
-        }
-
-        break;
-    }
-
-    views.push_back(privateMapAddress);
-    return privateMapAddress;
-}
-
-void* MemoryMappedFile::remapPrivateView(void* oldPrivateAddr) {
-    LockMongoFilesExclusive lockMongoFiles;
+void* MemoryMappedFile::remapPrivateView(OperationContext* txn, void* oldPrivateAddr) {
+    LockMongoFilesExclusive lockMongoFiles(txn);
 
     privateViews.clearWritableBits(oldPrivateAddr, len);
 
@@ -415,104 +455,86 @@ void* MemoryMappedFile::remapPrivateView(void* oldPrivateAddr) {
                         0,                // file offset, high and low
                         0,                // bytes to map, 0 == all
                         oldPrivateAddr);  // we want the same address we had before
-    if (0 == newPrivateView) {
+    if (newPrivateView == 0) {
         DWORD dosError = GetLastError();
         log() << "MapViewOfFileEx for " << filename() << " failed with error "
               << errnoWithDescription(dosError) << " (file size is " << len << ")"
               << " in MemoryMappedFile::remapPrivateView" << endl;
     }
-    fassert(16148, newPrivateView == oldPrivateAddr);
+    invariant(newPrivateView == oldPrivateAddr);
     return newPrivateView;
 }
 
-class WindowsFlushable : public MemoryMappedFile::Flushable {
-public:
-    WindowsFlushable(MemoryMappedFile* theFile,
-                     void* view,
-                     HANDLE fd,
-                     const uint64_t id,
-                     const std::string& filename,
-                     stdx::mutex& flushMutex)
-        : _theFile(theFile),
-          _view(view),
-          _fd(fd),
-          _id(id),
-          _filename(filename),
-          _flushMutex(flushMutex) {}
+WindowsFlushable::WindowsFlushable(MemoryMappedFile* theFile,
+                                   void* view,
+                                   HANDLE fd,
+                                   const uint64_t id,
+                                   const std::string& filename,
+                                   stdx::mutex& flushMutex)
+    : _theFile(theFile),
+      _view(view),
+      _fd(fd),
+      _id(id),
+      _filename(filename),
+      _flushMutex(flushMutex) {}
 
-    void flush() {
-        if (!_view || !_fd)
+void WindowsFlushable::flush(OperationContext* txn) {
+    if (!_view || !_fd)
+        return;
+
+    {
+        LockMongoFilesShared mmfilesLock(txn);
+
+        std::set<MongoFile*> mmfs = MongoFile::getAllFiles();
+        std::set<MongoFile*>::const_iterator it = mmfs.find(_theFile);
+        if (it == mmfs.end() || (*it)->getUniqueId() != _id) {
+            // this was deleted while we were unlocked
             return;
-
-        {
-            LockMongoFilesShared mmfilesLock;
-
-            std::set<MongoFile*> mmfs = MongoFile::getAllFiles();
-            std::set<MongoFile*>::const_iterator it = mmfs.find(_theFile);
-            if (it == mmfs.end() || (*it)->getUniqueId() != _id) {
-                // this was deleted while we were unlocked
-                return;
-            }
-
-            // Hold the flush mutex to ensure the file is not closed during flush
-            _flushMutex.lock();
         }
 
-        stdx::lock_guard<stdx::mutex> lk(_flushMutex, stdx::adopt_lock);
-
-        int loopCount = 0;
-        bool success = false;
-        bool timeout = false;
-        int dosError = ERROR_SUCCESS;
-        const int maximumTimeInSeconds = 60 * 15;
-        Timer t;
-        while (!success && !timeout) {
-            ++loopCount;
-            success = FALSE != FlushViewOfFile(_view, 0);
-            if (!success) {
-                dosError = GetLastError();
-                if (dosError != ERROR_LOCK_VIOLATION) {
-                    break;
-                }
-                timeout = t.seconds() > maximumTimeInSeconds;
-            }
-        }
-        if (success && loopCount > 1) {
-            log() << "FlushViewOfFile for " << _filename << " succeeded after " << loopCount
-                  << " attempts taking " << t.millis() << "ms" << endl;
-        } else if (!success) {
-            log() << "FlushViewOfFile for " << _filename << " failed with error " << dosError
-                  << " after " << loopCount << " attempts taking " << t.millis() << "ms" << endl;
-            // Abort here to avoid data corruption
-            fassert(16387, false);
-        }
-
-        success = FALSE != FlushFileBuffers(_fd);
-        if (!success) {
-            int err = GetLastError();
-            log() << "FlushFileBuffers failed: " << errnoWithDescription(err)
-                  << " file: " << _filename << endl;
-            dataSyncFailedHandler();
-        }
+        // Hold the flush mutex to ensure the file is not closed during flush
+        _flushMutex.lock();
     }
 
-    MemoryMappedFile* _theFile;  // this may be deleted while we are running
-    void* _view;
-    HANDLE _fd;
-    const uint64_t _id;
-    string _filename;
-    stdx::mutex& _flushMutex;
-};
+    stdx::lock_guard<stdx::mutex> lk(_flushMutex, stdx::adopt_lock);
 
-void MemoryMappedFile::flush(bool sync) {
-    uassert(13056, "Async flushing not supported on windows", sync);
-    if (!views.empty()) {
-        WindowsFlushable f(this, viewForFlushing(), fd, _uniqueId, filename(), _flushMutex);
-        f.flush();
+    int loopCount = 0;
+    bool success = false;
+    bool timeout = false;
+    int dosError = ERROR_SUCCESS;
+    const int maximumTimeInSeconds = 60 * 15;
+    Timer t;
+    while (!success && !timeout) {
+        ++loopCount;
+        success = FALSE != FlushViewOfFile(_view, 0);
+        if (!success) {
+            dosError = GetLastError();
+            if (dosError != ERROR_LOCK_VIOLATION) {
+                break;
+            }
+            timeout = t.seconds() > maximumTimeInSeconds;
+        }
+    }
+    if (success && loopCount > 1) {
+        log() << "FlushViewOfFile for " << _filename << " succeeded after " << loopCount
+              << " attempts taking " << t.millis() << "ms" << endl;
+    } else if (!success) {
+        log() << "FlushViewOfFile for " << _filename << " failed with error " << dosError
+              << " after " << loopCount << " attempts taking " << t.millis() << "ms" << endl;
+        // Abort here to avoid data corruption
+        fassert(16387, false);
+    }
+
+    success = FALSE != FlushFileBuffers(_fd);
+    if (!success) {
+        int err = GetLastError();
+        log() << "FlushFileBuffers failed: " << errnoWithDescription(err) << " file: " << _filename
+              << endl;
+        dataSyncFailedHandler();
     }
 }
 
 MemoryMappedFile::Flushable* MemoryMappedFile::prepareFlush() {
     return new WindowsFlushable(this, viewForFlushing(), fd, _uniqueId, filename(), _flushMutex);
 }
-}
+}  // namespace mongo

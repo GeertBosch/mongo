@@ -32,7 +32,9 @@
 
 #include <boost/filesystem/operations.hpp>
 #include <list>
+#include <vector>
 
+#include "mongo/db/operation_context.h"
 #include "mongo/db/storage/mmap_v1/dur_journalformat.h"
 #include "mongo/util/concurrency/mutex.h"
 
@@ -53,13 +55,17 @@ public:
     RecoveryJob();
     ~RecoveryJob();
 
-    void go(std::vector<boost::filesystem::path>& files);
+    void go(OperationContext* txn, std::vector<boost::filesystem::path>& files);
 
     /** @param data data between header and footer. compressed if recovering. */
-    void processSection(const JSectHeader* h, const void* data, unsigned len, const JSectFooter* f);
+    void processSection(OperationContext* txn,
+                        const JSectHeader* h,
+                        const void* data,
+                        unsigned len,
+                        const JSectFooter* f);
 
     // locks and calls _close()
-    void close();
+    void close(OperationContext* txn);
 
     static RecoveryJob& get() {
         return _instance;
@@ -68,10 +74,14 @@ public:
 private:
     class Last {
     public:
-        Last();
+        explicit Last(OperationContext* txn);
         DurableMappedFile* newEntry(const ParsedJournalEntry&, RecoveryJob&);
+        OperationContext* txn() {
+            return _txn;
+        }
 
     private:
+        OperationContext* const _txn;
         DurableMappedFile* mmf;
         std::string dbName;
         int fileNo;
@@ -80,10 +90,10 @@ private:
 
     void write(Last& last, const ParsedJournalEntry& entry);  // actually writes to the file
     void applyEntry(Last& last, const ParsedJournalEntry& entry, bool apply, bool dump);
-    void applyEntries(const std::vector<ParsedJournalEntry>& entries);
-    bool processFileBuffer(const void*, unsigned len);
-    bool processFile(boost::filesystem::path journalfile);
-    void _close();  // doesn't lock
+    void applyEntries(OperationContext* txn, const std::vector<ParsedJournalEntry>& entries);
+    bool processFileBuffer(OperationContext* txn, const void*, unsigned len);
+    bool processFile(OperationContext* txn, boost::filesystem::path journalfile);
+    void _close(OperationContext* txn);
 
 
     // Set of memory mapped files and a mutex to protect them

@@ -159,7 +159,7 @@ public:
     DataFile(int fn) : _fileNo(fn), _mb(NULL) {}
 
     /** @return true if found and opened. if uninitialized (prealloc only) does not open. */
-    Status openExisting(const char* filename);
+    Status openExisting(OperationContext* txn, const char* filename);
 
     /** creates if DNE */
     void open(OperationContext* txn,

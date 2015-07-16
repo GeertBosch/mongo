@@ -31,6 +31,9 @@
 
 #pragma once
 
+#include <string>
+
+#include "mongo/db/operation_context.h"
 #include "mongo/db/storage/mmap_v1/mmap.h"
 #include "mongo/db/storage/paths.h"
 #include "mongo/stdx/mutex.h"
@@ -53,7 +56,9 @@ public:
     virtual ~DurableMappedFile();
 
     /** @return true if opened ok. */
-    bool open(const std::string& fname, bool sequentialHint /*typically we open with this false*/);
+    bool open(OperationContext* txn,
+              const std::string& fname,
+              bool sequentialHint /*typically we open with this false*/);
 
     /** @return file length */
     unsigned long long length() const {
@@ -73,7 +78,10 @@ public:
        @param sequentialHint if true will be sequentially accessed
        @return true for ok
     */
-    bool create(const std::string& fname, unsigned long long& len, bool sequentialHint);
+    bool create(OperationContext* txn,
+                const std::string& fname,
+                unsigned long long& len,
+                bool sequentialHint);
 
     /* Get the "standard" view (which is the private one).
        @return the private view.
@@ -117,7 +125,7 @@ public:
         _willNeedRemap = true;
     }
 
-    void remapThePrivateView();
+    void remapThePrivateView(OperationContext* txn);
 
     virtual bool isDurableMappedFile() {
         return true;

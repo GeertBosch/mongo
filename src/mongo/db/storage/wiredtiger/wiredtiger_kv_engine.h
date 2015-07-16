@@ -94,7 +94,7 @@ public:
                               StringData ident,
                               const RecordStore* originalRecordStore) const;
 
-    virtual int flushAllFiles(bool sync);
+    virtual int flushAllFiles(OperationContext* opCtx, bool sync);
 
     virtual int64_t getIdentSize(OperationContext* opCtx, StringData ident);
 

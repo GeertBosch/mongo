@@ -78,9 +78,9 @@ class MmapV1RecordFetcher : public RecordFetcher {
 public:
     explicit MmapV1RecordFetcher(const MmapV1RecordHeader* record) : _record(record) {}
 
-    virtual void setup() {
+    virtual void setup(OperationContext* txn) {
         invariant(!_filesLock.get());
-        _filesLock.reset(new LockMongoFilesShared());
+        _filesLock.reset(new LockMongoFilesShared(txn));
     }
 
     virtual void fetch() {
@@ -166,7 +166,7 @@ Status MmapV1ExtentManager::init(OperationContext* txn) {
 
         unique_ptr<DataFile> df(new DataFile(n));
 
-        Status s = df->openExisting(fullNameString.c_str());
+        Status s = df->openExisting(txn, fullNameString.c_str());
         if (!s.isOK()) {
             return s;
         }

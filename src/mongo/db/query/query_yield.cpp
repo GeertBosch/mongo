@@ -39,8 +39,9 @@ namespace mongo {
 // static
 void QueryYield::yieldAllLocks(OperationContext* txn, RecordFetcher* fetcher) {
     // Things have to happen here in a specific order:
-    //   1) Tell the RecordFetcher to do any setup which needs to happen inside locks
-    //   2) Release lock mgr locks
+    //   1) Tell the RecordFetcher to do its setup (acquiring the LockMongoFilesShared lock)
+    //      which needs to happen while still holding on to database lock
+    //   2) Release lock mgr locks, except the LockMongoFilesShared lock
     //   3) Go to sleep
     //   4) Touch the record we're yielding on, if there is one (RecordFetcher::fetch)
     //   5) Reacquire lock mgr locks
@@ -50,7 +51,7 @@ void QueryYield::yieldAllLocks(OperationContext* txn, RecordFetcher* fetcher) {
     Locker::LockSnapshot snapshot;
 
     if (fetcher) {
-        fetcher->setup();
+        fetcher->setup(txn);
     }
 
     // Nothing was unlocked, just return, yielding is pointless.

@@ -38,6 +38,7 @@
 #include <sys/types.h>
 
 #include "mongo/platform/atomic_word.h"
+#include "mongo/db/client.h"
 #include "mongo/db/concurrency/d_concurrency.h"
 #include "mongo/db/storage/mmap_v1/file_allocator.h"
 #include "mongo/db/storage/mmap_v1/mmap.h"
@@ -65,24 +66,43 @@ static size_t fetchMinOSPageSizeBytes() {
 const size_t g_minOSPageSizeBytes = fetchMinOSPageSizeBytes();
 
 
-MemoryMappedFile::MemoryMappedFile() : _uniqueId(mmfNextId.fetchAndAdd(1)) {
-    fd = 0;
-    maphandle = 0;
-    len = 0;
-    created();
+class PosixFlushable : public MemoryMappedFile::Flushable {
+public:
+    PosixFlushable(MemoryMappedFile* theFile, void* view, HANDLE fd, long len);
+    void flush(OperationContext* txn);
+
+    MemoryMappedFile* _theFile;
+    void* _view;
+    HANDLE _fd;
+    long _len;
+    const uint64_t _id;
+};
+
+
+MemoryMappedFile::MemoryMappedFile()
+    : fd(0), maphandle(0), len(0), _uniqueId(mmfNextId.fetchAndAdd(1)) {
+    created(cc().getOperationContext());
 }
 
-void MemoryMappedFile::close() {
-    LockMongoFilesShared::assertExclusivelyLocked();
+void MemoryMappedFile::close(OperationContext* txn) {
+    LockMongoFilesShared::assertExclusivelyLocked(txn);
     for (vector<void*>::iterator i = views.begin(); i != views.end(); i++) {
         munmap(*i, len);
     }
     views.clear();
+    totalMappedLength.fetchAndSubtract(len);
+    len = 0;
 
-    if (fd)
+
+    if (fd) {
         ::close(fd);
-    fd = 0;
-    destroyed();  // cleans up from the master list of mmaps
+        fd = 0;
+    }
+    destroyed(txn);  // cleans up from the master list of mmaps
+}
+
+bool MemoryMappedFile::isClosed() {
+    return !len && !fd && !views.size();
 }
 
 #ifndef O_NOATIME
@@ -150,11 +170,65 @@ MAdvise::~MAdvise() {
 }
 #endif
 
-void* MemoryMappedFile::map(const char* filename, unsigned long long& length, int options) {
+void* MemoryMappedFile::createReadOnlyMap() {
+    void* readOnlyMapAddress = mmap(/*start*/ 0, len, PROT_READ, MAP_SHARED, fd, 0);
+    if (readOnlyMapAddress == MAP_FAILED) {
+        if (errno == ENOMEM) {
+            if (sizeof(void*) == 4)
+                error() << "mmap ro failed with out of memory. You are using a 32-bit build and "
+                           "probably need to upgrade to 64" << endl;
+            else
+                error() << "mmap ro failed with out of memory. (64 bit build)" << endl;
+        }
+        return 0;
+    }
+    return readOnlyMapAddress;
+}
+
+void* MemoryMappedFile::createPrivateMap() {
+    void* privateMapAddress =
+        mmap(/*start*/ 0, len, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_NORESERVE, fd, 0);
+    if (privateMapAddress == MAP_FAILED) {
+        if (errno == ENOMEM) {
+            if (sizeof(void*) == 4) {
+                error() << "mmap private failed with out of memory. You are using a 32-bit build "
+                           "and probably need to upgrade to 64" << endl;
+            } else {
+                error() << "mmap private failed with out of memory. (64 bit build)" << endl;
+            }
+        } else {
+            error() << "mmap private failed " << errnoWithDescription() << endl;
+        }
+        return 0;
+    }
+
+    views.push_back(privateMapAddress);
+    return privateMapAddress;
+}
+
+void MemoryMappedFile::flush(bool sync) {
+    if (views.empty() || fd == 0)
+        return;
+
+    bool useFsync = sync && !ProcessInfo::preferMsyncOverFSync();
+
+    if (useFsync ? fsync(fd) != 0 : msync(viewForFlushing(), len, sync ? MS_SYNC : MS_ASYNC)) {
+        // msync failed, this is very bad
+        log() << (useFsync ? "fsync failed: " : "msync failed: ") << errnoWithDescription()
+              << " file: " << filename() << endl;
+        dataSyncFailedHandler();
+    }
+}
+
+
+void* MemoryMappedFile::map(OperationContext* txn,
+                            const char* filename,
+                            unsigned long long& length,
+                            int options) {
     // length may be updated by callee.
-    setFilename(filename);
+    // Don't update len and totalMappedLenght unless the map is successful.
+    setFilename(txn, filename);
     FileAllocator::get()->allocateAsap(filename, length);
-    len = length;
 
     massert(
         10446, str::stream() << "mmap: can't map area of size 0 file: " << filename, length > 0);
@@ -199,128 +273,77 @@ void* MemoryMappedFile::map(const char* filename, unsigned long long& length, in
     }
 #endif
 
-    views.push_back(view);
+    //  MemoryMappedFile successfully created, now update state.
+    MemoryMappedFile::totalMappedLength.fetchAndSubtract(len);
+    len = length;
+    MemoryMappedFile::totalMappedLength.fetchAndAdd(len);
 
+    views.push_back(view);
     return view;
 }
 
-void* MemoryMappedFile::createReadOnlyMap() {
-    void* x = mmap(/*start*/ 0, len, PROT_READ, MAP_SHARED, fd, 0);
-    if (x == MAP_FAILED) {
-        if (errno == ENOMEM) {
-            if (sizeof(void*) == 4)
-                error() << "mmap ro failed with out of memory. You are using a 32-bit build and "
-                           "probably need to upgrade to 64" << endl;
-            else
-                error() << "mmap ro failed with out of memory. (64 bit build)" << endl;
-        }
-        return 0;
-    }
-    return x;
-}
 
-void* MemoryMappedFile::createPrivateMap() {
-    void* x = mmap(/*start*/ 0, len, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_NORESERVE, fd, 0);
-    if (x == MAP_FAILED) {
-        if (errno == ENOMEM) {
-            if (sizeof(void*) == 4) {
-                error() << "mmap private failed with out of memory. You are using a 32-bit build "
-                           "and probably need to upgrade to 64" << endl;
-            } else {
-                error() << "mmap private failed with out of memory. (64 bit build)" << endl;
-            }
-        } else {
-            error() << "mmap private failed " << errnoWithDescription() << endl;
-        }
-        return 0;
-    }
-
-    views.push_back(x);
-    return x;
-}
-
-void* MemoryMappedFile::remapPrivateView(void* oldPrivateAddr) {
+void* MemoryMappedFile::remapPrivateView(OperationContext* txn, void* oldPrivateAddr) {
 #if defined(__sun)  // SERVER-8795
-    LockMongoFilesExclusive lockMongoFiles;
+    LockMongoFilesExclusive lockMongoFiles(txn);
 #endif
 
     // don't unmap, just mmap over the old region
-    void* x = mmap(oldPrivateAddr,
-                   len,
-                   PROT_READ | PROT_WRITE,
-                   MAP_PRIVATE | MAP_NORESERVE | MAP_FIXED,
-                   fd,
-                   0);
-    if (x == MAP_FAILED) {
+    void* newPrivateView = mmap(oldPrivateAddr,
+                                len,
+                                PROT_READ | PROT_WRITE,
+                                MAP_PRIVATE | MAP_NORESERVE | MAP_FIXED,
+                                fd,
+                                0);
+    if (newPrivateView == MAP_FAILED) {
         int err = errno;
         error() << "13601 Couldn't remap private view: " << errnoWithDescription(err) << endl;
         log() << "aborting" << endl;
         printMemInfo();
         abort();
     }
-    verify(x == oldPrivateAddr);
-    return x;
+    invariant(newPrivateView == oldPrivateAddr);
+    return newPrivateView;
 }
 
-void MemoryMappedFile::flush(bool sync) {
-    if (views.empty() || fd == 0)
+PosixFlushable::PosixFlushable(MemoryMappedFile* theFile, void* view, HANDLE fd, long len)
+    : _theFile(theFile), _view(view), _fd(fd), _len(len), _id(_theFile->getUniqueId()) {}
+
+
+void PosixFlushable::flush(OperationContext* txn) {
+    if (_view == NULL || _fd == 0)
         return;
 
-    bool useFsync = sync && !ProcessInfo::preferMsyncOverFSync();
-
-    if (useFsync ? fsync(fd) != 0 : msync(viewForFlushing(), len, sync ? MS_SYNC : MS_ASYNC)) {
-        // msync failed, this is very bad
-        log() << (useFsync ? "fsync failed: " : "msync failed: ") << errnoWithDescription()
-              << " file: " << filename() << endl;
-        dataSyncFailedHandler();
+    if (ProcessInfo::preferMsyncOverFSync() ? msync(_view, _len, MS_SYNC) == 0 : fsync(_fd) == 0) {
+        return;
     }
-}
 
-class PosixFlushable : public MemoryMappedFile::Flushable {
-public:
-    PosixFlushable(MemoryMappedFile* theFile, void* view, HANDLE fd, long len)
-        : _theFile(theFile), _view(view), _fd(fd), _len(len), _id(_theFile->getUniqueId()) {}
+    if (errno == EBADF) {
+        // ok, we were unlocked, so this file was closed
+        return;
+    }
 
-    void flush() {
-        if (_view == NULL || _fd == 0)
-            return;
+    // some error, lets see if we're supposed to exist
 
-        if (ProcessInfo::preferMsyncOverFSync() ? msync(_view, _len, MS_SYNC) == 0
-                                                : fsync(_fd) == 0) {
-            return;
-        }
+    {
+        LockMongoFilesShared mmfilesLock(txn);
 
-        if (errno == EBADF) {
-            // ok, we were unlocked, so this file was closed
-            return;
-        }
-
-        // some error, lets see if we're supposed to exist
-        LockMongoFilesShared mmfilesLock;
         std::set<MongoFile*> mmfs = MongoFile::getAllFiles();
         std::set<MongoFile*>::const_iterator it = mmfs.find(_theFile);
-        if ((it == mmfs.end()) || ((*it)->getUniqueId() != _id)) {
+        if (it == mmfs.end() || (*it)->getUniqueId() != _id) {
             log() << "msync failed with: " << errnoWithDescription()
                   << " but file doesn't exist anymore, so ignoring";
             // this was deleted while we were unlocked
             return;
         }
-
-        // we got an error, and we still exist, so this is bad, we fail
-        log() << "msync " << errnoWithDescription() << endl;
-        dataSyncFailedHandler();
     }
 
-    MemoryMappedFile* _theFile;
-    void* _view;
-    HANDLE _fd;
-    long _len;
-    const uint64_t _id;
-};
+    // we got an error, and we still exist, so this is bad, we fail
+    log() << "msync " << errnoWithDescription() << endl;
+    dataSyncFailedHandler();
+}
 
 MemoryMappedFile::Flushable* MemoryMappedFile::prepareFlush() {
     return new PosixFlushable(this, viewForFlushing(), fd, len);
 }
-
-
 }  // namespace mongo

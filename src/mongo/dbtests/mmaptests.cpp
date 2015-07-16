@@ -33,7 +33,9 @@
 #include <boost/filesystem/operations.hpp>
 #include <iostream>
 
+#include "mongo/db/client.h"
 #include "mongo/db/concurrency/lock_state.h"
+#include "mongo/db/operation_context_impl.h"
 #include "mongo/db/service_context.h"
 #include "mongo/db/storage/mmap_v1/data_file.h"
 #include "mongo/db/storage/mmap_v1/durable_mapped_file.h"
@@ -53,6 +55,7 @@ using std::string;
 class LeakTest {
     const string fn;
     const int optOld;
+    OperationContextImpl _txn;
 
 public:
     LeakTest()
@@ -73,13 +76,12 @@ public:
         } catch (...) {
         }
 
-        MMAPV1LockerImpl lockState;
-        Lock::GlobalWrite lk(&lockState);
+        Lock::GlobalWrite lk(_txn.lockState());
 
         {
             DurableMappedFile f;
             unsigned long long len = 256 * 1024 * 1024;
-            verify(f.create(fn, len, /*sequential*/ false));
+            verify(f.create(&_txn, fn, len, /*sequential*/ false));
             {
                 char* p = (char*)f.getView();
                 verify(p);
@@ -92,12 +94,12 @@ public:
                 char* w = (char*)f.view_write();
                 strcpy(w + 6, "world");
             }
-            MongoFileFinder ff;
+            MongoFileFinder ff(&_txn);
             ASSERT(ff.findByPath(fn));
             ASSERT(ff.findByPath("asdf") == 0);
         }
         {
-            MongoFileFinder ff;
+            MongoFileFinder ff(&_txn);
             ASSERT(ff.findByPath(fn) == 0);
         }
 
@@ -111,7 +113,7 @@ public:
         Timer t;
         for (int i = 0; i < N; i++) {
             DurableMappedFile f;
-            verify(f.open(fn, i % 4 == 1));
+            verify(f.open(&_txn, fn, i % 4 == 1));
             {
                 char* p = (char*)f.getView();
                 verify(p);

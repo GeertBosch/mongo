@@ -53,6 +53,7 @@ DataFileSync::DataFileSync()
 
 void DataFileSync::run() {
     Client::initThread(name().c_str());
+    Client& client = cc();
 
     if (storageGlobalParams.syncdelay == 0) {
         log() << "warning: --syncdelay 0 is not recommended and can have strange performance"
@@ -79,9 +80,10 @@ void DataFileSync::run() {
             break;
         }
 
+        auto txn = client.makeOperationContext();
         Date_t start = jsTime();
         StorageEngine* storageEngine = getGlobalServiceContext()->getGlobalStorageEngine();
-        int numFiles = storageEngine->flushAllFiles(true);
+        int numFiles = storageEngine->flushAllFiles(txn.get(), true);
         time_flushing = durationCount<Milliseconds>(jsTime() - start);
 
         _flushed(time_flushing);
@@ -120,7 +122,7 @@ class MemJournalServerStatusMetric : public ServerStatusMetric {
 public:
     MemJournalServerStatusMetric() : ServerStatusMetric(".mem.mapped") {}
     virtual void appendAtLeaf(BSONObjBuilder& b) const {
-        int m = static_cast<int>(MemoryMappedFile::totalMappedLength() / (1024 * 1024));
+        int m = MemoryMappedFile::totalMappedLengthInMB();
         b.appendNumber("mapped", m);
 
         if (storageGlobalParams.dur) {

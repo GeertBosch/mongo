@@ -531,7 +531,9 @@ bool LockerImpl<IsForMMAPV1>::saveLockStateAndUnlock(Locker::LockSnapshot* state
     LockRequestsMap::Iterator globalRequest = _requests.find(resourceIdGlobal);
     if (!globalRequest) {
         // If there's no global lock there isn't really anything to do.
-        invariant(_requests.empty());
+        // The only lock that may be present is the MMAPv1 Files lock which is used by the fetcher
+        invariant(_requests.empty() ||
+                  (_requests.size() == 1 && !_requests.find(resourceIdMMAPV1Files).finished()));
         return false;
     }
 
@@ -550,8 +552,13 @@ bool LockerImpl<IsForMMAPV1>::saveLockStateAndUnlock(Locker::LockSnapshot* state
     for (LockRequestsMap::Iterator it = _requests.begin(); !it.finished(); it.next()) {
         const ResourceId resId = it.key();
 
+        // The MMAPv1 file locks are needed by the fetcher and have to be exempt from yielding.
+        // There is no issue with regular resource locks as this is a metadata lock, see below.
+        if (IsForMMAPV1 && resourceIdMMAPV1Files == resId)
+            continue;
+
         // We should never have to save and restore metadata locks.
-        invariant((IsForMMAPV1 && (resourceIdMMAPV1Flush == resId)) ||
+        invariant((IsForMMAPV1 && resourceIdMMAPV1Flush == resId) ||
                   RESOURCE_DATABASE == resId.getType() || RESOURCE_COLLECTION == resId.getType() ||
                   (RESOURCE_GLOBAL == resId.getType() && isSharedLockMode(it->mode)));
 
@@ -621,7 +628,8 @@ LockResult LockerImpl<IsForMMAPV1>::lockBegin(ResourceId resId, LockMode mode) {
     // Give priority to the full modes for global, parallel batch writer mode,
     // and flush lock so we don't stall global operations such as shutdown or flush.
     const ResourceType resType = resId.getType();
-    if (resType == RESOURCE_GLOBAL || (IsForMMAPV1 && resId == resourceIdMMAPV1Flush)) {
+    if (resType == RESOURCE_GLOBAL ||
+        (IsForMMAPV1 && (resId == resourceIdMMAPV1Flush || resId == resourceIdMMAPV1Files))) {
         if (mode == MODE_S || mode == MODE_X) {
             request->enqueueAtFront = true;
             request->compatibleFirst = true;
@@ -635,7 +643,7 @@ LockResult LockerImpl<IsForMMAPV1>::lockBegin(ResourceId resId, LockMode mode) {
             invariant(itGlobal->mode != MODE_NONE);
 
             // Check the MMAP V1 flush lock is held in the appropriate mode
-            invariant(!IsForMMAPV1 ||
+            invariant(!IsForMMAPV1 || resId == resourceIdMMAPV1Files ||
                       isLockHeldForMode(resourceIdMMAPV1Flush, _getModeForMMAPV1FlushLock()));
         };
     }
@@ -666,7 +674,8 @@ LockResult LockerImpl<IsForMMAPV1>::lockComplete(ResourceId resId,
     // DB lock, while holding the flush lock, so it has to be released. This is only
     // correct to do if not in a write unit of work.
     const bool yieldFlushLock = IsForMMAPV1 && !inAWriteUnitOfWork() &&
-        resId.getType() != RESOURCE_GLOBAL && resId != resourceIdMMAPV1Flush;
+        resId.getType() != RESOURCE_GLOBAL && resId != resourceIdMMAPV1Flush &&
+        resId != resourceIdMMAPV1Files;
     if (yieldFlushLock) {
         invariant(unlock(resourceIdMMAPV1Flush));
     }
@@ -912,6 +921,8 @@ const ResourceId resourceIdOplog = ResourceId(RESOURCE_COLLECTION, StringData("l
 const ResourceId resourceIdAdminDB = ResourceId(RESOURCE_DATABASE, StringData("admin"));
 const ResourceId resourceIdParallelBatchWriterMode =
     ResourceId(RESOURCE_GLOBAL, ResourceId::SINGLETON_PARALLEL_BATCH_WRITER_MODE);
+const ResourceId resourceIdMMAPV1Files =
+    ResourceId(RESOURCE_METADATA, ResourceId::SINGLETON_MMAPV1_FILES);
 const ResourceId resourceCappedInFlight =
     ResourceId(RESOURCE_METADATA, ResourceId::SINGLETON_CAPPED_IN_FLIGHT);
 

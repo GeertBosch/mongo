@@ -185,6 +185,7 @@ public:
         SINGLETON_PARALLEL_BATCH_WRITER_MODE,
         SINGLETON_GLOBAL,
         SINGLETON_MMAPV1_FLUSH,
+        SINGLETON_MMAPV1_FILES,
         SINGLETON_CAPPED_IN_FLIGHT,
     };
 
@@ -268,6 +269,9 @@ extern const ResourceId resourceIdParallelBatchWriterMode;
 // Threads that need a consistent view of the world can lock this in MODE_X to prevent
 // concurrent in-flight capped inserts.
 extern const ResourceId resourceCappedInFlight;
+
+// Used for synchronizing access to MMAPV1 managed files
+extern const ResourceId resourceIdMMAPV1Files;
 
 /**
  * Interface on which granted lock requests will be notified. See the contract for the notify

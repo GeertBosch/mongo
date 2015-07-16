@@ -62,17 +62,13 @@ using std::map;
 using std::pair;
 using std::string;
 
-void DurableMappedFile::remapThePrivateView() {
+void DurableMappedFile::remapThePrivateView(OperationContext* txn) {
     verify(storageGlobalParams.dur);
 
     _willNeedRemap = false;
 
-    // todo 1.9 : it turns out we require that we always remap to the same address.
-    // so the remove / add isn't necessary and can be removed?
-    void* old = _view_private;
-    // privateViews.remove(_view_private);
-    _view_private = remapPrivateView(_view_private);
-    // privateViews.add(_view_private, this);
+    void* const old = _view_private;
+    _view_private = remapPrivateView(txn, _view_private);
     fassert(16112, _view_private == old);
 }
 
@@ -242,23 +238,24 @@ void DurableMappedFile::setPath(const std::string& f) {
     _p = RelativePath::fromFullPath(storageGlobalParams.dbpath, prefix);
 }
 
-bool DurableMappedFile::open(const std::string& fname, bool sequentialHint) {
+bool DurableMappedFile::open(OperationContext* txn, const std::string& fname, bool sequentialHint) {
     LOG(3) << "mmf open " << fname;
     invariant(!_view_write);
 
     setPath(fname);
-    _view_write = mapWithOptions(fname.c_str(), sequentialHint ? SEQUENTIAL : 0);
+    _view_write = mapWithOptions(txn, fname.c_str(), sequentialHint ? SEQUENTIAL : 0);
     return finishOpening();
 }
 
-bool DurableMappedFile::create(const std::string& fname,
+bool DurableMappedFile::create(OperationContext* txn,
+                               const std::string& fname,
                                unsigned long long& len,
                                bool sequentialHint) {
     LOG(3) << "mmf create " << fname;
     invariant(!_view_write);
 
     setPath(fname);
-    _view_write = map(fname.c_str(), len, sequentialHint ? SEQUENTIAL : 0);
+    _view_write = map(txn, fname.c_str(), len, sequentialHint ? SEQUENTIAL : 0);
     return finishOpening();
 }
 
@@ -302,10 +299,13 @@ DurableMappedFile::~DurableMappedFile() {
             getDur().closingFileNotification();
         }
 
-        LockMongoFilesExclusive lk;
+        //  Should ensure that all actual work happens inside close(), so no OpCtx is needed here
+        OperationContext* const txn = cc().getOperationContext();
+        invariant(txn);
+        LockMongoFilesExclusive lk(txn);
         privateViews.remove(_view_private, length());
 
-        MemoryMappedFile::close();
+        MemoryMappedFile::close(txn);
     } catch (...) {
         error() << "exception in ~DurableMappedFile";
     }

@@ -49,7 +49,7 @@ public:
 
     RecoveryUnit* newRecoveryUnit();
     void listDatabases(std::vector<std::string>* out) const;
-    int flushAllFiles(bool sync);
+    int flushAllFiles(OperationContext* txn, bool sync);
 
     DatabaseCatalogEntry* getDatabaseCatalogEntry(OperationContext* opCtx, StringData db);
 

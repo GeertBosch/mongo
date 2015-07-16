@@ -189,7 +189,7 @@ public:
     /**
      * @return number of files flushed
      */
-    virtual int flushAllFiles(bool sync) = 0;
+    virtual int flushAllFiles(OperationContext* txn, bool sync) = 0;
 
     /**
      * Recover as much data as possible from a potentially corrupt RecordStore.

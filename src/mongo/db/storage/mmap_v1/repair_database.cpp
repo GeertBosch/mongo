@@ -254,7 +254,7 @@ public:
             getDur().syncDataAndTruncateJournal(_txn);
 
             // need both in case journaling is disabled
-            MongoFile::flushAll(true);
+            MongoFile::flushAll(_txn, true);
 
             MONGO_ASSERT_ON_EXCEPTION(boost::filesystem::remove_all(_path));
         } catch (DBException& e) {
@@ -424,7 +424,7 @@ Status MMAPV1Engine::repairDatabase(OperationContext* txn,
         getDur().syncDataAndTruncateJournal(txn);
 
         // need both in case journaling is disabled
-        MongoFile::flushAll(true);
+        MongoFile::flushAll(txn, true);
 
         txn->checkForInterrupt();
     }
