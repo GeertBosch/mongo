@@ -51,7 +51,7 @@ class NamespaceIndex {
     MONGO_DISALLOW_COPYING(NamespaceIndex);
 
 public:
-    NamespaceIndex(const std::string& dir, const std::string& database);
+    NamespaceIndex(OperationContext* txn, const std::string& dir, const std::string& database);
     ~NamespaceIndex();
 
     /* returns true if the file represented by this file exists on disk */

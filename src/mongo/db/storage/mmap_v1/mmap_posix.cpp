@@ -79,9 +79,9 @@ public:
 };
 
 
-MemoryMappedFile::MemoryMappedFile()
+MemoryMappedFile::MemoryMappedFile(OperationContext* txn)
     : fd(0), maphandle(0), len(0), _uniqueId(mmfNextId.fetchAndAdd(1)) {
-    created(cc().getOperationContext());
+    created(txn);
 }
 
 void MemoryMappedFile::close(OperationContext* txn) {
@@ -276,7 +276,7 @@ void* MemoryMappedFile::map(OperationContext* txn,
     //  MemoryMappedFile successfully created, now update state.
     MemoryMappedFile::totalMappedLength.fetchAndSubtract(len);
     len = length;
-    MemoryMappedFile::totalMappedLength.fetchAndAdd(len);
+    MemoryMapp edFile::totalMappedLength.fetchAndAdd(len);
 
     views.push_back(view);
     return view;

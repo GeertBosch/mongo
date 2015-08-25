@@ -294,7 +294,7 @@ DurableMappedFile* RecoveryJob::Last::newEntry(const dur::ParsedJournalEntry& en
             log() << "journal error applying writes, file " << fn << " is not open" << endl;
             verify(false);
         }
-        std::shared_ptr<DurableMappedFile> sp(new DurableMappedFile);
+        std::shared_ptr<DurableMappedFile> sp(new DurableMappedFile(_txn));
         verify(sp->open(_txn, fn, false));
         rj._mmfs.push_back(sp);
         mmf = sp.get();
@@ -524,7 +524,7 @@ bool RecoveryJob::processFile(OperationContext* txn, boost::filesystem::path jou
         log() << "recover exception checking filesize" << endl;
     }
 
-    MemoryMappedFile f;
+    MemoryMappedFile f(txn);
     void* p = f.mapWithOptions(
         txn, journalfile.string().c_str(), MongoFile::READONLY | MongoFile::SEQUENTIAL);
     massert(13544, str::stream() << "recover error couldn't open " << journalfile.string(), p);

@@ -284,7 +284,8 @@ bool DurableMappedFile::finishOpening() {
     return false;
 }
 
-DurableMappedFile::DurableMappedFile() : _willNeedRemap(false) {
+DurableMappedFile::DurableMappedFile(OperationContext* txn)
+    : MemoryMappedFile(txn), _willNeedRemap(false) {
     _view_write = _view_private = 0;
 }
 

@@ -51,8 +51,10 @@ using std::endl;
 using std::list;
 using std::string;
 
-NamespaceIndex::NamespaceIndex(const std::string& dir, const std::string& database)
-    : _dir(dir), _database(database), _ht(nullptr) {}
+NamespaceIndex::NamespaceIndex(OperationContext* txn,
+                               const std::string& dir,
+                               const std::string& database)
+    : _dir(dir), _database(database), _f(txn), _ht(nullptr) {}
 
 NamespaceIndex::~NamespaceIndex() {}
 

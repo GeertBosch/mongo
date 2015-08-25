@@ -155,7 +155,7 @@ MMAPV1DatabaseCatalogEntry::MMAPV1DatabaseCatalogEntry(
     OperationContext* txn, StringData name, StringData path, bool directoryPerDB, bool transient)
     : DatabaseCatalogEntry(name),
       _path(path.toString()),
-      _namespaceIndex(_path, name.toString()),
+      _namespaceIndex(txn, _path, name.toString()),
       _extentManager(name, path, directoryPerDB) {
     invariant(txn->lockState()->isDbLockedForMode(name, MODE_X));
 

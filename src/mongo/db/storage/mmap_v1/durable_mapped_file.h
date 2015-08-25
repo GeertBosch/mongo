@@ -52,7 +52,7 @@ protected:
     }
 
 public:
-    DurableMappedFile();
+    explicit DurableMappedFile(OperationContext* txn);
     virtual ~DurableMappedFile();
 
     /** @return true if opened ok. */

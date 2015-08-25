@@ -172,9 +172,9 @@ static void* getNextMemoryMappedFileLocation(unsigned long long mmfSize) {
     return reinterpret_cast<void*>(static_cast<uintptr_t>(thisMemoryMappedFileLocation));
 }
 
-MemoryMappedFile::MemoryMappedFile()
+MemoryMappedFile::MemoryMappedFile(OperationContext* txn)
     : _uniqueId(mmfNextId.fetchAndAdd(1)), fd(0), maphandle(0), len(0) {
-    created(cc().getOperationContext());
+    created(txn);
 }
 
 void MemoryMappedFile::close(OperationContext* txn) {

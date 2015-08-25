@@ -164,7 +164,7 @@ Status MmapV1ExtentManager::init(OperationContext* txn) {
             }
         }
 
-        unique_ptr<DataFile> df(new DataFile(n));
+        unique_ptr<DataFile> df(new DataFile(txn, n));
 
         Status s = df->openExisting(txn, fullNameString.c_str());
         if (!s.isOK()) {
@@ -232,7 +232,7 @@ DataFile* MmapV1ExtentManager::_addAFile(OperationContext* txn,
     }
 
     {
-        unique_ptr<DataFile> allocFile(new DataFile(allocFileId));
+        unique_ptr<DataFile> allocFile(new DataFile(txn, allocFileId));
         const string allocFileName = _fileName(allocFileId).string();
 
         Timer t;
@@ -249,7 +249,7 @@ DataFile* MmapV1ExtentManager::_addAFile(OperationContext* txn,
 
     // Preallocate is asynchronous
     if (preallocateNextFile) {
-        unique_ptr<DataFile> nextFile(new DataFile(allocFileId + 1));
+        unique_ptr<DataFile> nextFile(new DataFile(txn, allocFileId + 1));
         const string nextFileName = _fileName(allocFileId + 1).string();
 
         nextFile->open(txn, nextFileName.c_str(), minSize, false);

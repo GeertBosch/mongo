@@ -70,7 +70,8 @@ class LockMongoFilesShared {
 public:
     explicit LockMongoFilesShared(OperationContext* txn)
         : lk(txn->lockState(), resourceIdMMAPV1Files, MODE_IS) {
-        dassert(txn == cc().getOperationContext());
+        // JS worker threads may not have cc() setup, as they work on behalve of other clients
+        dassert(txn == cc().getOperationContext() || !cc().getOperationCOntext());
     }
 
     /** era changes anytime memory maps come and go.  thus you can use this as a cheap way to check
@@ -98,7 +99,8 @@ class LockMongoFilesExclusive {
 public:
     explicit LockMongoFilesExclusive(OperationContext* txn)
         : lk(txn->lockState(), resourceIdMMAPV1Files, MODE_X) {
-        dassert(txn == cc().getOperationContext());
+        // JS worker threads may not have cc() setup, as they work on behalve of other clients
+        dassert(txn == cc().getOperationContext() || !cc().getOperationCOntext());
         LockMongoFilesShared::era++;
     }
 };
@@ -215,7 +217,7 @@ protected:
     }
 
 public:
-    MemoryMappedFile();
+    explicit MemoryMappedFile(OperationContext* txn);
 
     virtual ~MemoryMappedFile();
 
