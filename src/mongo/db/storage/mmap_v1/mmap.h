@@ -71,7 +71,7 @@ public:
     explicit LockMongoFilesShared(OperationContext* txn)
         : lk(txn->lockState(), resourceIdMMAPV1Files, MODE_IS) {
         // JS worker threads may not have cc() setup, as they work on behalve of other clients
-        dassert(txn == cc().getOperationContext() || !cc().getOperationCOntext());
+        dassert(txn == cc().getOperationContext() || !cc().getOperationContext());
     }
 
     /** era changes anytime memory maps come and go.  thus you can use this as a cheap way to check
@@ -100,7 +100,7 @@ public:
     explicit LockMongoFilesExclusive(OperationContext* txn)
         : lk(txn->lockState(), resourceIdMMAPV1Files, MODE_X) {
         // JS worker threads may not have cc() setup, as they work on behalve of other clients
-        dassert(txn == cc().getOperationContext() || !cc().getOperationCOntext());
+        dassert(txn == cc().getOperationContext() || !cc().getOperationContext());
         LockMongoFilesShared::era++;
     }
 };
