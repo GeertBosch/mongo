@@ -79,7 +79,7 @@ public:
         Lock::GlobalWrite lk(_txn.lockState());
 
         {
-            DurableMappedFile f;
+            DurableMappedFile f(&_txn);
             unsigned long long len = 256 * 1024 * 1024;
             verify(f.create(&_txn, fn, len, /*sequential*/ false));
             {
@@ -112,7 +112,7 @@ public:
         // we make a lot here -- if we were leaking, presumably it would fail doing this many.
         Timer t;
         for (int i = 0; i < N; i++) {
-            DurableMappedFile f;
+            DurableMappedFile f(&_txn);
             verify(f.open(&_txn, fn, i % 4 == 1));
             {
                 char* p = (char*)f.getView();

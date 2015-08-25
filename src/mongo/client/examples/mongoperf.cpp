@@ -173,7 +173,8 @@ void go() {
         recSizeKB = 4;
     verify(recSizeKB <= 64000 && recSizeKB > 0);
 
-    MemoryMappedFile f;
+    auto txn = cc().makeOperationContext();
+    MemoryMappedFile f(txn.get());
     cout << "creating test file size:";
     len = options["fileSizeMB"].numberLong();
     if (len == 0)
@@ -206,12 +207,11 @@ void go() {
         }
     }
     BSONObj& o = options;
-    auto txn = cc().makeOperationContext();
 
     if (o["mmf"].trueValue()) {
         delete lf;
         lf = 0;
-        mmfFile = new MemoryMappedFile();
+        mmfFile = new MemoryMappedFile(txn.get());
         mmf = (char*)mmfFile->map(txn.get(), fname);
         verify(mmf);
 

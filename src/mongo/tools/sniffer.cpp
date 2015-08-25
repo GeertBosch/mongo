@@ -441,10 +441,11 @@ void processMessage(Connection& c, Message& m) {
 
 void processDiagLog(const char* file) {
     Connection c;
-    MemoryMappedFile f;
+    auto txn = mongo::cc().makeOperationContext();
+    MemoryMappedFile f(txn.get());
     long length;
     unsigned long long L = 0;
-    char* root = (char*)f.map(file, L, MemoryMappedFile::SEQUENTIAL);
+    char* root = (char*)f.map(txn.get(), file, L, MemoryMappedFile::SEQUENTIAL);
     verify(L < 0x80000000);
     length = (long)L;
     verify(root);
@@ -465,7 +466,7 @@ void processDiagLog(const char* file) {
         pos += len;
     }
 
-    f.close();
+    f.close(txn.get());
 }
 
 void usage() {
