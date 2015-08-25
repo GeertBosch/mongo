@@ -276,7 +276,7 @@ void* MemoryMappedFile::map(OperationContext* txn,
     //  MemoryMappedFile successfully created, now update state.
     MemoryMappedFile::totalMappedLength.fetchAndSubtract(len);
     len = length;
-    MemoryMapp edFile::totalMappedLength.fetchAndAdd(len);
+    MemoryMappedFile::totalMappedLength.fetchAndAdd(len);
 
     views.push_back(view);
     return view;
