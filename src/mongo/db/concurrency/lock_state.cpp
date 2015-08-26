@@ -628,12 +628,13 @@ LockResult LockerImpl<IsForMMAPV1>::lockBegin(ResourceId resId, LockMode mode) {
     // Give priority to the full modes for global, parallel batch writer mode,
     // and flush lock so we don't stall global operations such as shutdown or flush.
     const ResourceType resType = resId.getType();
-    if (resType == RESOURCE_GLOBAL ||
-        (IsForMMAPV1 && (resId == resourceIdMMAPV1Flush || resId == resourceIdMMAPV1Files))) {
+    if (resType == RESOURCE_GLOBAL || (IsForMMAPV1 && (resId == resourceIdMMAPV1Flush))) {
         if (mode == MODE_S || mode == MODE_X) {
             request->enqueueAtFront = true;
             request->compatibleFirst = true;
         }
+    } else if (IsForMMAPV1 && (resID == resourceIdMMAPV1Files)) {
+        // Don't do any checking for global locks in this case, as we may lock files without that
     } else {
         // This is all sanity checks that the global and flush locks are always be acquired
         // before any other lock has been acquired and they must be in sync with the nesting.
