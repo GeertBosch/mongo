@@ -196,7 +196,10 @@ BSONObj UpdateStage::transformAndUpdate(const Snapshotted<BSONObj>& oldObj, Reco
     UpdateLifecycle* lifecycle = request->getLifecycle();
 
     // If asked to return new doc, default to the oldObj, in case nothing changes.
-    BSONObj newObj = oldObj.value();
+    BSONObj newObj;
+    if (_params.request->shouldReturnNewDocs()) {
+        newObj = oldObj.value();
+    }
 
     // Ask the driver to apply the mods. It may be that the driver can apply those "in
     // place", that is, some values of the old document just get adjusted without any
@@ -295,7 +298,7 @@ BSONObj UpdateStage::transformAndUpdate(const Snapshotted<BSONObj>& oldObj, Reco
             args.stmtId = request->getStmtId();
             args.update = logObj;
             auto metadata = css->getMetadata(getOpCtx());
-            args.criteria = metadata->extractDocumentKey(newObj);
+            args.criteria = metadata->extractDocumentKey(oldObj.value());
             uassert(16980,
                     "Multi-update operations require all documents to have an '_id' field",
                     !request->isMulti() || args.criteria.hasField("_id"_sd));
@@ -308,7 +311,6 @@ BSONObj UpdateStage::transformAndUpdate(const Snapshotted<BSONObj>& oldObj, Reco
 
         if (inPlace) {
             if (!request->isExplain()) {
-                newObj = oldObj.value();
                 const RecordData oldRec(oldObj.value().objdata(), oldObj.value().objsize());
 
                 Snapshotted<RecordData> snap(oldObj.snapshotId(), oldRec);
@@ -316,7 +318,9 @@ BSONObj UpdateStage::transformAndUpdate(const Snapshotted<BSONObj>& oldObj, Reco
                 StatusWith<RecordData> newRecStatus = _collection->updateDocumentWithDamages(
                     getOpCtx(), recordId, std::move(snap), source, _damages, &args);
 
-                newObj = uassertStatusOK(std::move(newRecStatus)).releaseToBson();
+                if (_params.request->shouldReturnNewDocs()) {
+                    newObj = uassertStatusOK(std::move(newRecStatus)).releaseToBson();
+                }
             }
 
             newRecordId = recordId;

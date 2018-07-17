@@ -83,7 +83,8 @@ public:
                                              const RecordId& recId,
                                              const RecordData& oldRec,
                                              const char* damageSource,
-                                             const mutablebson::DamageVector& damages) override;
+                                             const mutablebson::DamageVector& damages,
+                                             bool returnNewRecord) override;
 
     std::unique_ptr<SeekableRecordCursor> getCursor(OperationContext* opCtx,
                                                     bool forward) const override;

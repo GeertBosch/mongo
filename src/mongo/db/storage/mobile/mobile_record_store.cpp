@@ -373,7 +373,8 @@ StatusWith<RecordData> MobileRecordStore::updateWithDamages(
     const RecordId& recId,
     const RecordData& oldRec,
     const char* damageSource,
-    const mutablebson::DamageVector& damages) {
+    const mutablebson::DamageVector& damages,
+    bool returnNewRecord) {
     return RecordData();
 }
 

@@ -93,7 +93,8 @@ TEST(RecordStoreTestHarness, UpdateWithDamages) {
             dv[2].size = 3;
 
             WriteUnitOfWork uow(opCtx.get());
-            auto newRecStatus = rs->updateWithDamages(opCtx.get(), loc, rec, data.c_str(), dv);
+            auto newRecStatus =
+                rs->updateWithDamages(opCtx.get(), loc, rec, data.c_str(), dv, true);
             ASSERT_OK(newRecStatus.getStatus());
             ASSERT_EQUALS(modifiedData, newRecStatus.getValue().data());
             uow.commit();
@@ -156,7 +157,8 @@ TEST(RecordStoreTestHarness, UpdateWithOverlappingDamageEvents) {
             dv[1].size = 5;
 
             WriteUnitOfWork uow(opCtx.get());
-            auto newRecStatus = rs->updateWithDamages(opCtx.get(), loc, rec, data.c_str(), dv);
+            auto newRecStatus =
+                rs->updateWithDamages(opCtx.get(), loc, rec, data.c_str(), dv, true);
             ASSERT_OK(newRecStatus.getStatus());
             ASSERT_EQUALS(modifiedData, newRecStatus.getValue().data());
             uow.commit();
@@ -220,7 +222,8 @@ TEST(RecordStoreTestHarness, UpdateWithOverlappingDamageEventsReversed) {
             dv[1].size = 5;
 
             WriteUnitOfWork uow(opCtx.get());
-            auto newRecStatus = rs->updateWithDamages(opCtx.get(), loc, rec, data.c_str(), dv);
+            auto newRecStatus =
+                rs->updateWithDamages(opCtx.get(), loc, rec, data.c_str(), dv, true);
             ASSERT_OK(newRecStatus.getStatus());
             ASSERT_EQUALS(modifiedData, newRecStatus.getValue().data());
             uow.commit();
@@ -275,7 +278,7 @@ TEST(RecordStoreTestHarness, UpdateWithNoDamages) {
             mutablebson::DamageVector dv;
 
             WriteUnitOfWork uow(opCtx.get());
-            auto newRecStatus = rs->updateWithDamages(opCtx.get(), loc, rec, "", dv);
+            auto newRecStatus = rs->updateWithDamages(opCtx.get(), loc, rec, "", dv, true);
             ASSERT_OK(newRecStatus.getStatus());
             ASSERT_EQUALS(data, newRecStatus.getValue().data());
             uow.commit();

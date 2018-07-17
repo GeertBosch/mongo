@@ -449,7 +449,8 @@ public:
                                                      const RecordId& loc,
                                                      const RecordData& oldRec,
                                                      const char* damageSource,
-                                                     const mutablebson::DamageVector& damages) = 0;
+                                                     const mutablebson::DamageVector& damages,
+                                                     bool returnNewRecord) = 0;
 
     /**
      * Returns a new cursor over this record store.

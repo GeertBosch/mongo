@@ -168,7 +168,8 @@ public:
                                                      const RecordId& id,
                                                      const RecordData& oldRec,
                                                      const char* damageSource,
-                                                     const mutablebson::DamageVector& damages);
+                                                     const mutablebson::DamageVector& damages,
+                                                     bool returnNewRecord);
 
     virtual std::unique_ptr<SeekableRecordCursor> getCursor(OperationContext* opCtx,
                                                             bool forward) const = 0;

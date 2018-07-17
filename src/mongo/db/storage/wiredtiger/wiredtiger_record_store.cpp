@@ -1556,7 +1556,8 @@ StatusWith<RecordData> WiredTigerRecordStore::updateWithDamages(
     const RecordId& id,
     const RecordData& oldRec,
     const char* damageSource,
-    const mutablebson::DamageVector& damages) {
+    const mutablebson::DamageVector& damages,
+    bool returnNewRecord) {
 
     const int nentries = damages.size();
     auto where = damages.begin();
@@ -1581,10 +1582,13 @@ StatusWith<RecordData> WiredTigerRecordStore::updateWithDamages(
     else
         invariantWTOK(WT_OP_CHECK(c->modify(c, entries.data(), nentries)));
 
-    WT_ITEM value;
-    invariantWTOK(c->get_value(c, &value));
-
-    return RecordData(static_cast<const char*>(value.data), value.size).getOwned();
+    if (returnNewRecord) {
+        WT_ITEM value;
+        invariantWTOK(c->get_value(c, &value));
+        return RecordData(static_cast<const char*>(value.data), value.size).getOwned();
+    } else {
+        return Status::OK();
+    }
 }
 
 std::unique_ptr<RecordCursor> WiredTigerRecordStore::getRandomCursor(

@@ -716,11 +716,18 @@ StatusWith<RecordData> CollectionImpl::updateDocumentWithDamages(
     // Broadcast the mutation so that query results stay correct.
     _cursorManager.invalidateDocument(opCtx, loc, INVALIDATION_MUTATION);
 
-    auto newRecStatus =
-        _recordStore->updateWithDamages(opCtx, loc, oldRec.value(), damageSource, damages);
+    auto newRecStatus = _recordStore->updateWithDamages(
+        opCtx,
+        loc,
+        oldRec.value(),
+        damageSource,
+        damages,
+        args->storeDocOption == OplogUpdateEntryArgs::StoreDocOption::PostImage);
 
     if (newRecStatus.isOK()) {
-        args->updatedDoc = newRecStatus.getValue().toBson();
+        if (args->storeDocOption == OplogUpdateEntryArgs::StoreDocOption::PostImage) {
+            args->updatedDoc = newRecStatus.getValue().toBson();
+        }
 
         getGlobalServiceContext()->getOpObserver()->onUpdate(opCtx, *args);
     }

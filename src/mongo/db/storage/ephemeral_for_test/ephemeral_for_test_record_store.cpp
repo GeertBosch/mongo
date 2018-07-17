@@ -512,7 +512,8 @@ StatusWith<RecordData> EphemeralForTestRecordStore::updateWithDamages(
     const RecordId& loc,
     const RecordData& oldRec,
     const char* damageSource,
-    const mutablebson::DamageVector& damages) {
+    const mutablebson::DamageVector& damages,
+    bool returnNewRecord) {
 
     stdx::lock_guard<stdx::recursive_mutex> lock(_data->recordsMutex);
 
