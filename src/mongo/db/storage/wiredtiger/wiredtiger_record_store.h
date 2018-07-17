@@ -171,6 +171,11 @@ public:
                                                      const mutablebson::DamageVector& damages,
                                                      bool returnNewRecord);
 
+    virtual StatusWith<RecordData> updateWithModifications(OperationContext* opCtx,
+                                                           const RecordId& id,
+                                                           const RecordData& oldRec,
+                                                           std::vector<UpdateModification>& mods);
+
     virtual std::unique_ptr<SeekableRecordCursor> getCursor(OperationContext* opCtx,
                                                             bool forward) const = 0;
 

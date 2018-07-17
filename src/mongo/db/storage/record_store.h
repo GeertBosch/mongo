@@ -38,6 +38,7 @@
 #include "mongo/db/record_id.h"
 #include "mongo/db/storage/record_data.h"
 #include "mongo/db/storage/record_fetcher.h"
+#include "mongo/db/storage/update_modification.h"
 
 namespace mongo {
 
@@ -451,6 +452,14 @@ public:
                                                      const char* damageSource,
                                                      const mutablebson::DamageVector& damages,
                                                      bool returnNewRecord) = 0;
+
+    virtual StatusWith<RecordData> updateWithModifications(OperationContext* opCtx,
+                                                           const RecordId& id,
+                                                           const RecordData& oldRec,
+                                                           std::vector<UpdateModification>& mods) {
+        return Status(ErrorCodes::CommandNotSupported,
+                      "this storage engine does not support updateWithModifications");
+    }
 
     /**
      * Returns a new cursor over this record store.
