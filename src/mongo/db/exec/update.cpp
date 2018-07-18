@@ -234,7 +234,7 @@ BSONObj UpdateStage::transformAndUpdate(const Snapshotted<BSONObj>& oldObj, Reco
     std::vector<UpdateModification> mods;
     status = driver->tryUpdateAppend(StringData(),
                                      &_doc,
-                                     &newObj,
+                                     &oldObj.value(),
                                      &mods,
                                      validateForStorage,
                                      immutablePaths,
@@ -242,8 +242,6 @@ BSONObj UpdateStage::transformAndUpdate(const Snapshotted<BSONObj>& oldObj, Reco
                                      &docWasModified);
 
     if (!status.isOK()) {
-        printf("tryUpdateAppend status: %s\n", status.toString().c_str());
-
         if (!driver->needMatchDetails()) {
             // If we don't need match details, avoid doing the rematch
             status = driver->update(
@@ -325,7 +323,6 @@ BSONObj UpdateStage::transformAndUpdate(const Snapshotted<BSONObj>& oldObj, Reco
         }
 
         if (!mods.empty()) {
-            newObj = oldObj.value();
             const RecordData oldRec(oldObj.value().objdata(), oldObj.value().objsize());
 
             Snapshotted<RecordData> snap(oldObj.snapshotId(), oldRec);
@@ -333,7 +330,9 @@ BSONObj UpdateStage::transformAndUpdate(const Snapshotted<BSONObj>& oldObj, Reco
             StatusWith<RecordData> newRecStatus = _collection->updateDocumentWithModifications(
                 getOpCtx(), recordId, std::move(snap), mods, &args);
 
-            newObj = uassertStatusOK(std::move(newRecStatus)).releaseToBson();
+            if (_params.request->shouldReturnNewDocs()) {
+                newObj = uassertStatusOK(std::move(newRecStatus)).releaseToBson();
+            }
             newRecordId = recordId;
 
         } else if (inPlace) {
