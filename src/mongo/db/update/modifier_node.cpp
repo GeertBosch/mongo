@@ -223,9 +223,16 @@ UpdateNode::ApplyResult ModifierNode::applyToNonexistentElement(ApplyParams appl
         auto newElementFieldName =
             applyParams.pathToCreate->getPart(applyParams.pathToCreate->numParts() - 1);
         auto newElement = applyParams.element.getDocument().makeElementNull(newElementFieldName);
-        setValueForNewElement(&newElement);
 
-        invariant(newElement.ok());
+        if (applyParams.updateMods) {
+            setValueForNewElementWithMods(
+                applyParams.document, &newElement, applyParams.updateMods);
+            applyParams.validateForStorage = false;
+        } else {
+            setValueForNewElement(&newElement);
+            invariant(newElement.ok());
+        }
+
         auto statusWithFirstCreatedElem = pathsupport::createPathAt(
             *(applyParams.pathToCreate), 0, applyParams.element, newElement);
         if (!statusWithFirstCreatedElem.isOK()) {

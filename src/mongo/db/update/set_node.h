@@ -53,6 +53,10 @@ protected:
                                        std::shared_ptr<FieldRef> elementPath) const final;
     void setValueForNewElement(mutablebson::Element* element) const final;
 
+    void setValueForNewElementWithMods(const BSONObj* document,
+                                       const mutablebson::Element* element,
+                                       std::vector<UpdateModification>* mods) const final;
+
     bool allowCreation() const final {
         return true;
     }

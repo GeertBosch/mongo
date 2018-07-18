@@ -83,7 +83,13 @@ protected:
         const mutablebson::Element* element,
         std::shared_ptr<FieldRef> elementPath,
         std::vector<UpdateModification>* mods) const {
-        uasserted(ErrorCodes::NotImplemented, "Not implemented");
+        return ModifyResult::kNoOp;
+    };
+
+    virtual void setValueForNewElementWithMods(const BSONObj* document,
+                                               const mutablebson::Element* element,
+                                               std::vector<UpdateModification>* mods) const {
+        MONGO_UNREACHABLE;
     };
 
     /**

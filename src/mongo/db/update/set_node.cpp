@@ -31,6 +31,7 @@
 #include "mongo/db/update/set_node.h"
 
 #include "mongo/db/update/path_support.h"
+#include "mongo/util/assert_util.h"
 
 namespace mongo {
 
@@ -56,6 +57,32 @@ ModifierNode::ModifyResult SetNode::updateExistingElement(
 
 void SetNode::setValueForNewElement(mutablebson::Element* element) const {
     invariant(element->setValueBSONElement(_val));
+}
+
+void SetNode::setValueForNewElementWithMods(const BSONObj* document,
+                                            const mutablebson::Element* element,
+                                            std::vector<UpdateModification>* mods) const {
+    // End offset of the document
+    std::size_t bsonEnd = document->objsize() - 1;
+
+    BSONObjBuilder bob;
+    bob.appendAs(_val, element->getFieldName());
+
+    BSONObj newObj = bob.obj();
+
+    // The first 4 bytes of the new document (the size) need to be skipped.
+    int sizeLen = sizeof(std::uint32_t);
+    const char* newElem = newObj.objdata() + sizeLen;
+    std::uint32_t newElemLen = newObj.objsize() - sizeLen - 1;
+
+    // Create modify structure to replace the entire document size with the added size of
+    // the new elements.
+    std::uint32_t newDocSize =
+        newElemLen + *reinterpret_cast<const std::uint32_t*>(document->objdata());
+    mods->emplace_back(UpdateModification::Buffer(&newDocSize, sizeLen), 0, sizeLen);
+
+    // Create modify structure to insert the new element at the end.
+    mods->emplace_back(UpdateModification::Buffer(newElem, newElemLen), bsonEnd, 0);
 }
 
 }  // namespace mongo

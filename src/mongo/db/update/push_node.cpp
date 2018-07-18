@@ -276,6 +276,7 @@ ModifierNode::ModifyResult PushNode::performPushWithMods(
         if (auto pushElem = pushMap[bsonElem.fieldName()]) {
 
             int insertIndex = 0;
+            // This will get very slow.
             for (BSONObjIterator it(bsonElem.Obj()); it.more(); it.next()) {
                 insertIndex++;
             }

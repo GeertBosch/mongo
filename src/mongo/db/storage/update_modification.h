@@ -1,7 +1,5 @@
-// record_data.h
-
 /**
- *    Copyright (C) 2014 MongoDB Inc.
+ *    Copyright (C) 2018 MongoDB Inc.
  *
  *    This program is free software: you can redistribute it and/or  modify
  *    it under the terms of the GNU Affero General Public License, version 3,
@@ -49,7 +47,8 @@ public:
             std::memcpy(_data, source, _size);
         }
 
-        Buffer(const Buffer& buf) = delete;
+        Buffer(const Buffer& other) = delete;
+
         Buffer(Buffer&& buf) : _data(buf._data), _size(buf._size), _owned(buf._owned) {
             buf._data = nullptr;
             buf._size = 0;

@@ -261,8 +261,11 @@ Status UpdateDriver::tryUpdateAppend(StringData matchedField,
     if (docWasModified) {
         *docWasModified = !applyResult.noop;
     }
+    if (!applyResult.noop && !mods->empty()) {
+        return Status::OK();
+    }
 
-    return Status::OK();
+    return {ErrorCodes::NotImplemented, "Node does not support append with mods"};
 }
 
 Status UpdateDriver::update(StringData matchedField,
