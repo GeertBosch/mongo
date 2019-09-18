@@ -240,6 +240,35 @@ BSONObjBuilder::~BSONObjBuilder() {
     }
 }
 
+void BSONArrayBuilder::_promoteToFastArrayTypeIfPossible() {
+    if (_fastArrayType != Undefined) {
+        *bb().buf() = FastArray;
+        log() << "promoted Array to FastArray of type " << typeName(_fastArrayType);
+    } else if (_fieldCount) {
+        log() << "failed to promote array to FastArray";
+    }
+}
+
+void BSONArrayBuilder::_checkFastArrayType(BSONType type) {
+    if (_fastArrayType == Undefined)
+        return;
+    if (_fastArrayType == EOO)
+        _fastArrayType = type;
+    if (!isValidFastArrayType(type) || _fastArrayType != type) {
+        log() << "Type not elegible for FastArray: " << typeName(type) << ", was "
+              << typeName(_fastArrayType);
+        _fastArrayType = Undefined;
+        // TODO(SERVER(3980): Do whatever extra processing is necessary to rewrite the object.
+    }
+}
+
+void BSONArrayBuilder::_markHeterogeneousArray() {
+    if (_fastArrayType != Undefined) {
+        log() << "Marking array as heterogeneous, type was " << typeName(_fastArrayType);
+        _fastArrayType = Undefined;
+    }
+}
+
 template <typename Alloc>
 void BasicBufBuilder<Alloc>::grow_reallocate(int minSize) {
     if (minSize > BufferMaxSize) {

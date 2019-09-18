@@ -301,6 +301,8 @@ public:
     */
     BSONElement getField(StringData name) const;
 
+    BSONElement getFieldAtPos(int pos) const;
+
     /** Get several fields at once. This is faster than separate getField() calls as the size of
         elements iterated can then be calculated only once each.
         @param n number of fieldNames, and number of elements in the fields array

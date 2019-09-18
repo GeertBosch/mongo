@@ -230,7 +230,7 @@ public:
         style fields in it.
     */
     BSONObjBuilder& appendArray(StringData fieldName, const BSONObj& subObj) {
-        _b.appendNum(subObj.firstElementType() == FastArray ? (char) FastArray : (char)Array);
+        _b.appendNum(subObj.firstElementType() == FastArray ? (char)FastArray : (char)Array);
         _b.appendStr(fieldName);
         _b.appendBuf((void*)subObj.objdata(), subObj.objsize());
         return *this;
@@ -774,7 +774,7 @@ public:
     template <typename T>
     BSONArrayBuilder& append(const T& x) {
         _b.append(StringData(), x);
-        _fastArrayType = Undefined;
+        _markHeterogeneousArray();
         ++_fieldCount;
         return *this;
     }
@@ -793,21 +793,21 @@ public:
     template <typename T>
     BSONArrayBuilder& operator<<(const T& x) {
         _b << ""_sd << x;
-        _fastArrayType = Undefined;
+        _markHeterogeneousArray();
         ++_fieldCount;
         return *this;
     }
 
     BSONArrayBuilder& appendNull() {
         _b.appendNull(""_sd);
-        _fastArrayType = Undefined;
+        _markHeterogeneousArray();
         ++_fieldCount;
         return *this;
     }
 
     BSONArrayBuilder& appendUndefined() {
         _b.appendUndefined(""_sd);
-        _fastArrayType = Undefined;
+        _markHeterogeneousArray();
         ++_fieldCount;
         return *this;
     }
@@ -841,68 +841,68 @@ public:
 
     // These two just use next position
     BufBuilder& subobjStart() {
-        _fastArrayType = Undefined;
+        _markHeterogeneousArray();
         ++_fieldCount;
         return _b.subobjStart(""_sd);
     }
     BufBuilder& subarrayStart() {
-        _fastArrayType = Undefined;
+        _markHeterogeneousArray();
         ++_fieldCount;
         return _b.subarrayStart(""_sd);
     }
 
     BSONArrayBuilder& appendRegex(StringData regex, StringData options = "") {
         _b.appendRegex(""_sd, regex, options);
-        _fastArrayType = Undefined;
+        _markHeterogeneousArray();
         ++_fieldCount;
         return *this;
     }
 
     BSONArrayBuilder& appendBinData(int len, BinDataType type, const void* data) {
         _b.appendBinData(""_sd, len, type, data);
-        _fastArrayType = Undefined;
+        _markHeterogeneousArray();
         ++_fieldCount;
         return *this;
     }
 
     BSONArrayBuilder& appendCode(StringData code) {
         _b.appendCode(""_sd, code);
-        _fastArrayType = Undefined;
+        _markHeterogeneousArray();
         ++_fieldCount;
         return *this;
     }
 
     BSONArrayBuilder& appendCodeWScope(StringData code, const BSONObj& scope) {
         _b.appendCodeWScope(""_sd, code, scope);
-        _fastArrayType = Undefined;
+        _markHeterogeneousArray();
         ++_fieldCount;
         return *this;
     }
 
     BSONArrayBuilder& appendTimeT(time_t dt) {
         _b.appendTimeT(""_sd, dt);
-        _fastArrayType = Undefined;
+        _markHeterogeneousArray();;
         ++_fieldCount;
         return *this;
     }
 
     BSONArrayBuilder& appendDate(Date_t dt) {
         _b.appendDate(""_sd, dt);
-        _fastArrayType = Undefined;
+        _markHeterogeneousArray();;
         ++_fieldCount;
         return *this;
     }
 
     BSONArrayBuilder& appendBool(bool val) {
         _b.appendBool(""_sd, val);
-        _fastArrayType = Undefined;
+        _markHeterogeneousArray();;
         ++_fieldCount;
         return *this;
     }
 
     BSONArrayBuilder& appendTimestamp(unsigned long long ts) {
         _b.appendTimestamp(""_sd, ts);
-        _fastArrayType = Undefined;
+        _markHeterogeneousArray();
         ++_fieldCount;
         return *this;
     }
@@ -923,21 +923,9 @@ public:
     }
 
 private:
-    void _checkFastArrayType(BSONType type) {
-        if (_fastArrayType == Undefined)
-            return;
-        if (_fastArrayType == EOO)
-            _fastArrayType = type;
-        if (!isValidFastArrayType(type) || _fastArrayType != type) {
-            _fastArrayType = Undefined;
-            // TODO(SERVER(3980): Do whatever extra processing is necessary to rewrite the object.
-        }
-    }
-    void _promoteToFastArrayTypeIfPossible() {
-        char* type = _b.bb().buf();
-        if (*type == Array &&_fastArrayType != Undefined)
-            *type = FastArray;
-    }
+    void _checkFastArrayType(BSONType type);
+    void _promoteToFastArrayTypeIfPossible();
+    void _markHeterogeneousArray();
 
     BSONObjBuilder _b;
     int _fieldCount = 0;
