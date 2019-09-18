@@ -110,7 +110,7 @@ enum BSONType {
     /** Single type array */
     FastArray = 20,
     /** max type that is not MaxKey */
-    JSTypeMax = 19,
+    JSTypeMax = 20,
     /** larger than all other types */
     MaxKey = 127
 };
@@ -141,6 +141,11 @@ std::ostream& operator<<(std::ostream& stream, BSONType type);
  * Returns whether or not 'type' can be converted to a valid BSONType.
  */
 bool isValidBSONType(int type);
+
+/**
+ * Returns whether or not 'type' is fixed size and can be stored in a fast array.
+ */
+bool isValidFastArrayType(int type);
 
 inline bool isNumericBSONType(BSONType type) {
     switch (type) {

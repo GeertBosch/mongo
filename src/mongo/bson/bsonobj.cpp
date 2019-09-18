@@ -437,7 +437,8 @@ Status BSONObj::storageValidEmbedded() const {
         if (e.mayEncapsulate()) {
             switch (e.type()) {
                 case Object:
-                case Array: {
+                case Array:
+                case FastArray: {
                     Status s = e.embeddedObject().storageValidEmbedded();
                     // TODO: combine field names for better error messages
                     if (!s.isOK())

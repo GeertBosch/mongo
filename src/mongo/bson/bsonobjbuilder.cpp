@@ -87,6 +87,7 @@ BSONObjBuilder& BSONObjBuilder::appendMinForType(StringData fieldName, int t) {
             append(fieldName, BSONObj());
             return *this;
         case Array:
+        case FastArray:
             appendArray(fieldName, BSONObj());
             return *this;
         case BinData:
@@ -157,6 +158,7 @@ BSONObjBuilder& BSONObjBuilder::appendMaxForType(StringData fieldName, int t) {
             appendMinForType(fieldName, Array);
             return *this;
         case Array:
+        case FastArray:
             appendMinForType(fieldName, BinData);
             return *this;
         case BinData:

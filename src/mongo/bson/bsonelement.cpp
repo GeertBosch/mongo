@@ -742,6 +742,7 @@ int BSONElement::computeSize() const {
         {SizeStyle::kFixed, 9},          // Timestamp
         {SizeStyle::kFixed, 9},          // Long
         {SizeStyle::kFixed, 17},         // Decimal
+        {SizeStyle::kIntPlusFixed, 1},   // FastArray
     };
     MONGO_STATIC_ASSERT((sizeof(kSizeInfoTable) / sizeof(kSizeInfoTable[0])) == JSTypeMax + 1);
 

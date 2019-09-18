@@ -298,6 +298,7 @@ Status validateElementInfo(Buffer* buffer,
         case CodeWScope:
             *nextState = ValidationState::BeginCodeWScope;
             return Status::OK();
+        case FastArray:
         case Object:
         case Array:
             *nextState = ValidationState::BeginObj;

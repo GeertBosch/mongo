@@ -89,6 +89,8 @@ const char* typeName(BSONType type) {
             return "long";
         case NumberDecimal:
             return "decimal";
+        case FastArray:
+            return "array";
         // JSTypeMax doesn't make sense to turn into a string; overlaps with highest-valued type
         case MaxKey:
             return "maxKey";
@@ -162,6 +164,24 @@ bool isValidBSONType(int type) {
         case NumberLong:
         case NumberDecimal:
         case MaxKey:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool isValidFastArrayType(int type) {
+    switch (type) {
+        case EOO:
+        case NumberDouble:
+        case jstOID:
+        case Bool:
+        case Date:
+        case jstNULL:
+        case NumberInt:
+        case bsonTimestamp:
+        case NumberLong:
+        case NumberDecimal:
             return true;
         default:
             return false;

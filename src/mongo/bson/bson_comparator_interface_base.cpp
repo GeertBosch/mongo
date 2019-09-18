@@ -157,10 +157,7 @@ void BSONComparatorInterfaceBase<T>::hashCombineBSONElement(
             break;
 
         case mongo::FastArray:
-            hashCombineBSONObj(hash,
-                               elemToHash.embeddedObject(),
-                               rules,
-                               stringComparator);
+            hashCombineBSONObj(hash, elemToHash.embeddedObject(), rules, stringComparator);
             break;
 
         case mongo::DBRef:

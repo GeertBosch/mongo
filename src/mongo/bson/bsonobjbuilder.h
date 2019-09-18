@@ -230,7 +230,7 @@ public:
         style fields in it.
     */
     BSONObjBuilder& appendArray(StringData fieldName, const BSONObj& subObj) {
-        _b.appendNum((char)Array);
+        _b.appendNum(subObj.firstElementType() == FastArray ? (char) FastArray : (char)Array);
         _b.appendStr(fieldName);
         _b.appendBuf((void*)subObj.objdata(), subObj.objsize());
         return *this;
@@ -762,15 +762,26 @@ public:
     BSONArrayBuilder(BufBuilder& _b) : _b(_b) {}
     BSONArrayBuilder(int initialSize) : _b(initialSize) {}
 
+    BSONArrayBuilder& append(const double d) {
+        _checkFastArrayType(NumberDouble);
+        _b.append(StringData(), d);
+        return *this;
+    }
+
+    /**
+     * Deal with remaining types that cannot be in a FastArray.
+     */
     template <typename T>
     BSONArrayBuilder& append(const T& x) {
-        _b.append(_fieldCount, x);
+        _b.append(StringData(), x);
+        _fastArrayType = Undefined;
         ++_fieldCount;
         return *this;
     }
 
     BSONArrayBuilder& append(const BSONElement& e) {
-        _b.appendAs(e, _fieldCount);
+        _b.appendAs(e, StringData());
+        _checkFastArrayType(e.type());
         ++_fieldCount;
         return *this;
     }
@@ -781,19 +792,22 @@ public:
 
     template <typename T>
     BSONArrayBuilder& operator<<(const T& x) {
-        _b << _fieldCount << x;
+        _b << ""_sd << x;
+        _fastArrayType = Undefined;
         ++_fieldCount;
         return *this;
     }
 
     BSONArrayBuilder& appendNull() {
-        _b.appendNull(_fieldCount);
+        _b.appendNull(""_sd);
+        _fastArrayType = Undefined;
         ++_fieldCount;
         return *this;
     }
 
     BSONArrayBuilder& appendUndefined() {
-        _b.appendUndefined(_fieldCount);
+        _b.appendUndefined(""_sd);
+        _fastArrayType = Undefined;
         ++_fieldCount;
         return *this;
     }
@@ -803,13 +817,15 @@ public:
      * @return owned BSONArray
      */
     BSONArray arr() {
-        return BSONArray(_b.obj());
+        return BSONArray(obj());
     }
     BSONObj obj() {
+        _promoteToFastArrayTypeIfPossible();
         return _b.obj();
     }
 
     BSONObj done() {
+        _promoteToFastArrayTypeIfPossible();
         return _b.done();
     }
 
@@ -825,56 +841,68 @@ public:
 
     // These two just use next position
     BufBuilder& subobjStart() {
-        return _b.subobjStart(_fieldCount++);
+        _fastArrayType = Undefined;
+        ++_fieldCount;
+        return _b.subobjStart(""_sd);
     }
     BufBuilder& subarrayStart() {
-        return _b.subarrayStart(_fieldCount++);
+        _fastArrayType = Undefined;
+        ++_fieldCount;
+        return _b.subarrayStart(""_sd);
     }
 
     BSONArrayBuilder& appendRegex(StringData regex, StringData options = "") {
-        _b.appendRegex(_fieldCount, regex, options);
+        _b.appendRegex(""_sd, regex, options);
+        _fastArrayType = Undefined;
         ++_fieldCount;
         return *this;
     }
 
     BSONArrayBuilder& appendBinData(int len, BinDataType type, const void* data) {
-        _b.appendBinData(_fieldCount, len, type, data);
+        _b.appendBinData(""_sd, len, type, data);
+        _fastArrayType = Undefined;
         ++_fieldCount;
         return *this;
     }
 
     BSONArrayBuilder& appendCode(StringData code) {
-        _b.appendCode(_fieldCount, code);
+        _b.appendCode(""_sd, code);
+        _fastArrayType = Undefined;
         ++_fieldCount;
         return *this;
     }
 
     BSONArrayBuilder& appendCodeWScope(StringData code, const BSONObj& scope) {
-        _b.appendCodeWScope(_fieldCount, code, scope);
+        _b.appendCodeWScope(""_sd, code, scope);
+        _fastArrayType = Undefined;
         ++_fieldCount;
         return *this;
     }
 
     BSONArrayBuilder& appendTimeT(time_t dt) {
-        _b.appendTimeT(_fieldCount, dt);
+        _b.appendTimeT(""_sd, dt);
+        _fastArrayType = Undefined;
         ++_fieldCount;
         return *this;
     }
 
     BSONArrayBuilder& appendDate(Date_t dt) {
-        _b.appendDate(_fieldCount, dt);
+        _b.appendDate(""_sd, dt);
+        _fastArrayType = Undefined;
         ++_fieldCount;
         return *this;
     }
 
     BSONArrayBuilder& appendBool(bool val) {
-        _b.appendBool(_fieldCount, val);
+        _b.appendBool(""_sd, val);
+        _fastArrayType = Undefined;
         ++_fieldCount;
         return *this;
     }
 
     BSONArrayBuilder& appendTimestamp(unsigned long long ts) {
-        _b.appendTimestamp(_fieldCount, ts);
+        _b.appendTimestamp(""_sd, ts);
+        _fastArrayType = Undefined;
         ++_fieldCount;
         return *this;
     }
@@ -895,8 +923,29 @@ public:
     }
 
 private:
-    DecimalCounter<uint32_t> _fieldCount;
+    void _checkFastArrayType(BSONType type) {
+        if (_fastArrayType == Undefined)
+            return;
+        if (_fastArrayType == EOO)
+            _fastArrayType = type;
+        if (!isValidFastArrayType(type) || _fastArrayType != type) {
+            _fastArrayType = Undefined;
+            // TODO(SERVER(3980): Do whatever extra processing is necessary to rewrite the object.
+        }
+    }
+    void _promoteToFastArrayTypeIfPossible() {
+        char* type = _b.bb().buf();
+        if (*type == Array &&_fastArrayType != Undefined)
+            *type = FastArray;
+    }
+
     BSONObjBuilder _b;
+    int _fieldCount = 0;
+    /**
+     *  Contains the BSON element type if all elements are the same and of a
+     * fixed size type, or Undefined otherwise. Contains EOO if the array is empty.
+     */
+    BSONType _fastArrayType = EOO;
 };
 
 template <class T>
