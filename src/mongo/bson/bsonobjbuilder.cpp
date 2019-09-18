@@ -242,7 +242,7 @@ BSONObjBuilder::~BSONObjBuilder() {
 
 void BSONArrayBuilder::_promoteToFastArrayTypeIfPossible() {
     if (_fastArrayType != Undefined) {
-        *bb().buf() = FastArray;
+        *(bb().buf() + 4) = FastArray;
         log() << "promoted Array to FastArray of type " << typeName(_fastArrayType);
     } else if (_fieldCount) {
         log() << "failed to promote array to FastArray";

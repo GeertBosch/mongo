@@ -694,6 +694,7 @@ Status JParse::array(StringData fieldName, BSONObjBuilder& builder, bool subObje
     if (!readToken(LBRACKET)) {
         return parseError("Expecting '['");
     }
+    BSONType fastArrayType = EOO;
 
     BSONObjBuilder* arrayBuilder = &builder;
     unique_ptr<BSONObjBuilder> subObjBuilder;
@@ -703,14 +704,34 @@ Status JParse::array(StringData fieldName, BSONObjBuilder& builder, bool subObje
     }
 
     if (!peekToken(RBRACKET)) {
-        DecimalCounter<uint32_t> index;
         do {
-            Status ret = value(StringData{index}, *arrayBuilder);
+            int lenBefore = arrayBuilder->bb().len();
+            Status ret = value(""_sd, *arrayBuilder);
             if (!ret.isOK()) {
                 return ret;
             }
-            ++index;
+
+            // Check if we're still building a FastArray.
+            char& type = arrayBuilder->bb().buf()[lenBefore];
+            BSONType bsonType = BSONType(type);
+            if (fastArrayType == Undefined)
+                continue;
+            if (fastArrayType == EOO)
+                fastArrayType = bsonType;
+            if (!isValidFastArrayType(bsonType) || fastArrayType != bsonType) {
+                log() << "Type not elegible for FastArray: " << typeName(bsonType) << ", was "
+                << typeName(fastArrayType);
+                fastArrayType = Undefined;
+                // TODO(SERVER(3980): Do whatever extra processing is necessary to rewrite the object.
+            }
+
         } while (readToken(COMMA));
+    }
+    // If we're still FastArray, update the type in the builder.
+    if (fastArrayType != Undefined) {
+        char* arrayType = arrayBuilder->bb().buf() + 4;
+        *arrayType = FastArray;
+        log() << "promoted Array to FastArray of type " << typeName(fastArrayType);
     }
     arrayBuilder->done();
     if (!readToken(RBRACKET)) {
