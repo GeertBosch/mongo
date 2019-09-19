@@ -326,12 +326,7 @@ public:
         return getField(field);
     }
 
-    BSONElement operator[](int field) const {
-        StringBuilder ss;
-        ss << field;
-        std::string s = ss.str();
-        return getField(s.c_str());
-    }
+    BSONElement operator[](int field) const;
 
     /** @return true if field exists */
     bool hasField(StringData name) const {

@@ -114,6 +114,11 @@ BSONObj BSONObj::getOwned(const BSONObj& obj) {
     return obj.getOwned();
 }
 
+BSONElement BSONObj::operator[](int field) const {
+    auto fieldName = std::to_string(field);
+    return getField(fieldName);
+}
+
 std::string BSONObj::jsonString(JsonStringFormat format, int pretty, bool isArray) const {
     std::stringstream s;
     BSONObj::jsonStringStream(format, pretty, isArray, s);
